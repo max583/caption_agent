@@ -100,13 +100,28 @@ No JavaScript build step. No SPA framework. The UI is deliberately minimal — t
 python -m venv .venv
 
 # Windows
-.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\pip install .
 .venv\Scripts\alembic upgrade head
 
 # Linux / macOS
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install .
 .venv/bin/alembic upgrade head
 ```
+
+For PostgreSQL support add the extra:
+
+```bash
+pip install ".[postgres]"
+```
+
+<details>
+<summary>Developer install</summary>
+
+```bash
+pip install -e ".[dev]"   # editable mode + pytest + ruff
+```
+
+</details>
 
 ## Running
 
