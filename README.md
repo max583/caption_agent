@@ -125,15 +125,26 @@ pip install -e ".[dev]"   # editable mode + pytest + ruff
 
 ## Running
 
-```bash
-# Windows — convenience launcher
+**Windows**
+
+```bat
 start.bat
+```
 
-# or directly
-.venv\Scripts\caption-agent-server
+**Linux / macOS**
 
-# with hot-reload (development)
+```bash
+.venv/bin/caption-agent-server
+```
+
+**With hot-reload (development)**
+
+```bash
+# Windows
 start-dev.bat
+
+# Linux / macOS
+CAPTION_AGENT_RELOAD=1 .venv/bin/caption-agent-server
 ```
 
 Server starts at `http://127.0.0.1:8765` by default.
