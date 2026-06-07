@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Caption Agent{% endblock %}</title>
+  <!-- Tailwind Play CDN (dev) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: '#1e2330',
+            card: '#252d3d',
+          }
+        }
+      }
+    }
+  </script>
+  <!-- HTMX -->
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <!-- Alpine.js -->
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .htmx-indicator { opacity: 0; transition: opacity 200ms; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+    /* State badge colors — raw CSS (Tailwind CDN @apply not reliable in plain <style>) */
+    .state-processing    { background:rgba(34,197,94,.15);  color:#4ade80; border:1px solid rgba(34,197,94,.3); }
+    .state-awaiting_review { background:rgba(234,179,8,.15); color:#fbbf24; border:1px solid rgba(234,179,8,.3); }
+    .state-error         { background:rgba(239,68,68,.15);  color:#f87171; border:1px solid rgba(239,68,68,.3); }
+    .state-done          { background:rgba(107,114,128,.15);color:#9ca3af; border:1px solid rgba(107,114,128,.3); }
+    .state-queued        { background:rgba(59,130,246,.15); color:#60a5fa; border:1px solid rgba(59,130,246,.3); }
+    .state-paused        { background:rgba(249,115,22,.15); color:#fb923c; border:1px solid rgba(249,115,22,.3); }
+    .state-scheduled     { background:rgba(168,85,247,.15); color:#c084fc; border:1px solid rgba(168,85,247,.3); }
+
+    /* Base component classes (must not use @apply — Tailwind CDN only processes utility classes
+       scanned from HTML, not @apply directives in plain <style> tags) */
+    .nav-link { color:#9ca3af; padding:.25rem .75rem; border-radius:.25rem; font-size:.875rem; transition:color 150ms; text-decoration:none; }
+    .nav-link:hover { color:#fff; }
+    .nav-link.active { color:#fff; background:#1f2937; }
+
+    .btn { padding:.5rem 1rem; border-radius:.25rem; font-size:.875rem; font-weight:500; transition:background-color 150ms,color 150ms; cursor:pointer; display:inline-flex; align-items:center; gap:.375rem; border:none; }
+    .btn-primary   { padding:.5rem 1rem; border-radius:.25rem; font-size:.875rem; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:.375rem; border:none; background:#2563eb; color:#fff; transition:background-color 150ms; }
+    .btn-primary:hover   { background:#3b82f6; }
+    .btn-secondary { padding:.5rem 1rem; border-radius:.25rem; font-size:.875rem; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:.375rem; border:none; background:#374151; color:#e5e7eb; transition:background-color 150ms; }
+    .btn-secondary:hover { background:#4b5563; }
+    .btn-danger    { padding:.5rem 1rem; border-radius:.25rem; font-size:.875rem; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:.375rem; border:none; background:#b91c1c; color:#fff; transition:background-color 150ms; }
+    .btn-danger:hover    { background:#dc2626; }
+    .btn-ghost     { padding:.5rem 1rem; border-radius:.25rem; font-size:.875rem; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:.375rem; border:none; background:transparent; color:#9ca3af; transition:background-color 150ms,color 150ms; }
+    .btn-ghost:hover     { color:#fff; background:#1f2937; }
+
+    .card  { background:#111827; border:1px solid #1f2937; border-radius:.5rem; }
+    .badge { padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:500; }
+    .input { background:#1f2937; border:1px solid #374151; border-radius:.25rem; padding:.5rem .75rem; font-size:.875rem; color:#f3f4f6; transition:border-color 150ms; }
+    .input:focus { outline:none; border-color:#3b82f6; }
+    .label { display:block; font-size:.75rem; color:#9ca3af; margin-bottom:.25rem; }
+    .section-title { font-size:1.125rem; font-weight:600; color:#fff; margin-bottom:1rem; }
+  </style>
+  <!-- Translation strings for JS (D-107) -->
+  <script>window._t = {{ t | tojson }};</script>
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col"
+      x-data="toastManager()"
+      x-cloak>
+
+  <!-- Top navigation -->
+  <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-40">
+    <a href="/" class="font-bold text-lg text-white tracking-tight">Caption Agent</a>
+    <div class="flex-1"></div>
+
+    <!-- LLM status indicator -->
+    <div x-data="llmIndicator()" x-init="init()"
+         class="flex items-center gap-2 text-xs border border-gray-800 rounded px-3 py-1.5 bg-gray-950/60">
+      <!-- Status dot -->
+      <span class="w-2 h-2 rounded-full flex-shrink-0 transition-colors"
+            :class="{
+              'bg-gray-600':  status === 'unknown',
+              'bg-green-400': status === 'ok',
+              'bg-red-400':   status === 'error'
+            }"></span>
+      <!-- Profile name -->
+      <span class="text-gray-300 font-medium" x-show="info && info.profile_name"
+            x-text="info && info.profile_name" x-cloak></span>
+      <span class="text-gray-600" x-show="info && info.profile_name" x-cloak>/</span>
+      <!-- Model ID — truncated to keep nav compact -->
+      <span class="text-gray-400 font-mono max-w-[14rem] truncate"
+            x-text="info ? (info.model_id || '—') : '…'"></span>
+      <!-- Latency (appears after a successful test) -->
+      <span class="text-gray-500" x-show="latencyMs !== null" x-cloak
+            x-text="latencyMs + ' ms'"></span>
+      <!-- Test/ping button -->
+      <button @click="runTest()"
+              :disabled="testing"
+              title="{{ t['btn_test_connection'] }}"
+              class="ml-1 text-gray-600 hover:text-gray-300 transition-colors disabled:opacity-40 leading-none">
+        <span x-show="!testing">🔌</span>
+        <span x-show="testing" x-cloak class="animate-pulse">…</span>
+      </button>
+    </div>
+
+    <a href="/" class="nav-link {% block nav_projects %}{% endblock %}">{{ t['nav_projects'] }}</a>
+    <a href="/settings" class="nav-link {% block nav_settings %}{% endblock %}">{{ t['nav_settings'] }}</a>
+    <a href="/journal" class="nav-link {% block nav_journal %}{% endblock %}">{{ t['nav_journal'] }}</a>
+    <a href="/help" class="nav-link {% block nav_help %}{% endblock %}" title="{{ t.get('nav_help', '?') }}">?</a>
+    <a href="?lang={{ 'en' if ui_lang == 'ru' else 'ru' }}"
+       class="nav-link text-xs border border-gray-700 rounded px-2 py-1 hover:border-gray-500"
+       title="Switch language / Сменить язык">{{ t['nav_lang_switch'] }}</a>
+  </nav>
+
+  <!-- Toast container -->
+  <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2" style="min-width:300px">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 shadow-lg flex items-start gap-3 cursor-pointer"
+           :class="{'border-red-500/50 bg-red-900/30': toast.type==='error',
+                    'border-yellow-500/50 bg-yellow-900/20': toast.type==='warning'}"
+           @click="removeToast(toast.id)"
+           x-show="toast.visible"
+           x-transition:enter="transition ease-out duration-200"
+           x-transition:enter-start="opacity-0 translate-x-4"
+           x-transition:enter-end="opacity-100 translate-x-0"
+           x-transition:leave="transition ease-in duration-150"
+           x-transition:leave-end="opacity-0 translate-x-4">
+        <span x-text="toast.message" class="text-sm flex-1"></span>
+        <span class="text-gray-500 text-xs mt-0.5">✕</span>
+      </div>
+    </template>
+  </div>
+
+  <!-- Main content -->
+  <main class="flex-1 container mx-auto px-6 py-6 max-w-6xl">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    function toastManager() {
+      return {
+        toasts: [],
+        _nextId: 1,
+        addToast(message, type = 'info', duration = 4000) {
+          const id = this._nextId++;
+          this.toasts.push({ id, message, type, visible: true });
+          setTimeout(() => this.removeToast(id), duration);
+        },
+        removeToast(id) {
+          this.toasts = this.toasts.filter(t => t.id !== id);
+        }
+      }
+    }
+
+    // Global HTMX event hooks for error handling.
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.addEventListener('htmx:responseError', (e) => {
+        const el = document.body._x_dataStack?.[0];
+        if (el?.addToast) el.addToast((window._t?.js_server_error || 'Server error: ') + e.detail.xhr.status, 'error', 7000);
+      });
+      document.body.addEventListener('htmx:sendError', () => {
+        const el = document.body._x_dataStack?.[0];
+        if (el?.addToast) el.addToast(window._t?.js_connection_lost || 'Connection lost', 'error', 7000);
+      });
+    });
+
+    // Processing time + ETA timer (D-103). Ticks every second while batch is processing.
+    // startedAt: ISO timestamp string. total/processed: item counts for ETA.
+    function processingTimer(startedAt, total, processed) {
+      return {
+        display: '⏱ …',
+        _timer: null,
+        start() {
+          this._tick();
+          this._timer = setInterval(() => this._tick(), 1000);
+        },
+        _tick() {
+          const elapsed = Math.floor((Date.now() - new Date(startedAt)) / 1000);
+          const _m = window._t?.lbl_time_min || 'm', _s = window._t?.lbl_time_sec || 's';
+          const em = Math.floor(elapsed / 60), es = elapsed % 60;
+          const elStr = em > 0 ? em + _m + ' ' + es + _s : es + _s;
+          if (processed < 3) {
+            this.display = '⏱ ' + elStr + ' | ETA ' + (window._t?.eta_computing || 'computing…');
+          } else {
+            const remaining = total - processed;
+            const etaSec = remaining > 0 ? Math.round((elapsed / processed) * remaining) : 0;
+            const em2 = Math.floor(etaSec / 60), es2 = etaSec % 60;
+            const etaStr = etaSec <= 0 ? (window._t?.eta_soon || 'soon') : (em2 > 0 ? '~' + em2 + _m + ' ' + es2 + _s : '~' + es2 + _s);
+            this.display = '⏱ ' + elStr + ' | ETA ' + etaStr;
+          }
+        },
+      };
+    }
+
+    // LLM nav indicator — polls /api/config/llm/status every 60 s for config changes;
+    // manual ping via 🔌 button calls /api/config/llm/test.
+    function llmIndicator() {
+      return {
+        info: null,        // {model_id, base_url, profile_name}
+        status: 'unknown', // 'unknown' | 'ok' | 'error'
+        latencyMs: null,
+        testing: false,
+        _timer: null,
+
+        async init() {
+          await this.fetchInfo();
+          this._timer = setInterval(() => this.fetchInfo(), 60000);
+        },
+
+        async fetchInfo() {
+          try {
+            const r = await fetch('/api/config/llm/status');
+            if (r.ok) this.info = await r.json();
+          } catch { /* server unreachable — leave info as-is */ }
+        },
+
+        async runTest() {
+          if (this.testing) return;
+          this.testing = true;
+          this.latencyMs = null;
+          try {
+            const r = await fetch('/api/config/llm/test', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) {
+              this.status = 'ok';
+              this.latencyMs = d.latency_ms;
+              // Refresh info in case model_id was returned from the test
+              if (d.model_id && this.info) this.info.model_id = d.model_id;
+            } else {
+              this.status = 'error';
+            }
+          } catch {
+            this.status = 'error';
+          } finally {
+            this.testing = false;
+          }
+        },
+      };
+    }
+
+    // Helper: show toast from anywhere.
+    function showToast(msg, type = 'info') {
+      const comp = Alpine.$data(document.body);
+      if (comp?.addToast) comp.addToast(msg, type);
+    }
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

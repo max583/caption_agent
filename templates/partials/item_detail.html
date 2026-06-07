@@ -1,0 +1,116 @@
+{% if item %}
+<div class="h-full flex flex-col gap-4">
+  <!-- Image preview -->
+  <div class="flex gap-4">
+    <div class="flex-shrink-0" x-data="{ lightbox: false }">
+      <img src="/api/items/{{ item.id }}/image"
+           alt="{{ item.file_name }}"
+           class="w-48 h-48 object-contain bg-gray-950 rounded border border-gray-800 cursor-pointer hover:border-gray-500"
+           @click="lightbox = true"
+           onerror="this.style.display='none'">
+      <!-- Lightbox overlay — closes on click outside or Esc -->
+      <div x-show="lightbox" x-cloak
+           class="fixed inset-0 z-50 flex items-center justify-center bg-black/85"
+           @click="lightbox = false"
+           @keydown.escape.window="lightbox = false">
+        <img src="/api/items/{{ item.id }}/image"
+             alt="{{ item.file_name }}"
+             class="max-h-screen max-w-screen object-contain"
+             @click.stop>
+      </div>
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="font-mono text-xs text-gray-400 mb-2">{{ item.file_name }}</div>
+      <div class="mb-1">
+        <span class="badge state-{{ item.state }}">{{ item.state }}</span>
+        {% if item.decision %}<span class="badge bg-gray-700 text-gray-300 ml-1">{{ item.decision }}</span>{% endif %}
+      </div>
+      {% if item.normalized_caption %}
+      <textarea id="caption-edit"
+                class="w-full text-sm text-gray-100 leading-relaxed mt-2 bg-gray-900 border border-gray-700 rounded p-2 resize-y focus:outline-none focus:border-gray-500"
+                rows="4">{{ item.final_caption if item.final_caption else item.normalized_caption }}</textarea>
+      <div class="flex justify-end mt-1">
+        <button type="button"
+                class="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded"
+                @click="saveCaption()">{{ t['btn_save'] }}</button>
+      </div>
+      {% else %}
+      <p class="text-sm text-gray-500 italic mt-2">{{ t['lbl_caption_not_ready'] }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Warnings -->
+  {% if item.warnings %}
+  <div>
+    <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">{{ t['lbl_warnings_detail'] }} ({{ item.warnings | length }})</div>
+    {% for w in item.warnings %}
+    <div class="flex items-start gap-2 text-xs py-1 border-b border-gray-800/50">
+      <span class="text-yellow-400 flex-shrink-0">⚠</span>
+      <div>
+        <span class="font-mono text-yellow-300">{{ w.get('source', '') }}/{{ w.get('code', '') }}</span>
+        {% set warn_label = t.get('warn_' + w.get('code', ''), '') %}
+        {% if warn_label %}<span class="text-gray-200 ml-1 font-medium">{{ warn_label }}</span>{% endif %}
+        <span class="text-gray-400 ml-1">{{ w.get('message', '') }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Error -->
+  {% if item.last_error_message %}
+  <div class="bg-red-900/20 border border-red-800/40 rounded p-3">
+    <div class="flex items-center justify-between mb-1">
+      <div class="text-xs text-red-400 font-medium">{{ t['lbl_error'] }} [{{ item.last_error_category }}]</div>
+      {% if item.last_error_at %}
+      <div class="text-xs text-red-400/70">{{ item.last_error_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
+      {% endif %}
+    </div>
+    <p class="text-xs text-red-300">{{ item.last_error_message }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Expandable sections -->
+  <div x-data="{ showCtx: false, showCandidates: false, showRaw: false }">
+    <button class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 mb-1"
+            @click="showCtx = !showCtx">
+      <span x-text="showCtx ? '▾' : '▸'"></span> {{ t['lbl_gen_context'] }}
+    </button>
+    <div x-show="showCtx" x-cloak class="text-xs text-gray-400 font-mono bg-gray-950 rounded p-3 mb-2 max-h-32 overflow-y-auto">
+      {% if item.generation_prompt %}{{ item.generation_prompt }}{% else %}—{% endif %}
+    </div>
+
+    {% if item.candidate_prompts %}
+    <button class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 mb-1"
+            @click="showCandidates = !showCandidates">
+      <span x-text="showCandidates ? '▾' : '▸'"></span> {{ t['lbl_candidate_prompts'] }} ({{ item.candidate_prompts | length }})
+    </button>
+    <div x-show="showCandidates" x-cloak class="mb-2 space-y-2">
+      {% for cp in item.candidate_prompts %}
+      <div class="bg-gray-950 rounded p-3 {% if cp.likely_negative %}opacity-50{% endif %}">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-mono text-gray-500">{{ cp.label }}</span>
+          {% if cp.likely_negative %}<span class="text-xs text-gray-600 italic">negative</span>{% endif %}
+          <button type="button"
+                  class="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded ml-2"
+                  @click="navigator.clipboard.writeText({{ cp.text | tojson }})">копировать</button>
+        </div>
+        <div class="text-xs text-gray-400 font-mono whitespace-pre-wrap break-words max-h-24 overflow-y-auto">{{ cp.text }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <button class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 mb-1"
+            @click="showRaw = !showRaw">
+      <span x-text="showRaw ? '▾' : '▸'"></span> {{ t['lbl_analyst_output'] }}
+    </button>
+    <div x-show="showRaw" x-cloak class="text-xs text-gray-400 font-mono bg-gray-950 rounded p-3 max-h-40 overflow-y-auto">
+      {% if item.raw_analyst_output %}{{ item.raw_analyst_output | tojson(indent=2) }}{% else %}—{% endif %}
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="text-gray-500 text-sm">{{ t['lbl_select_item'] }}</div>
+{% endif %}

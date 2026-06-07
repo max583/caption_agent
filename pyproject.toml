@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "caption-agent"
+version = "0.1.0"
+description = "Local web app for generating and reviewing LoRA training captions using LLM pipelines"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+    "Pillow>=10.0",
+    "python-multipart>=0.0.9",
+    "markdown>=3.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "httpx>=0.27",
+]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+
+[project.scripts]
+caption-agent-server = "caption_agent.main:run"
+caption-agent-migrate = "caption_agent.storage.migrate_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["caption_agent*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-p no:langsmith -m 'not smoke'"
+asyncio_mode = "auto"
+markers = [
+    "smoke: end-to-end tests that require a real LLM endpoint (skipped by default; set CAPTION_AGENT_SMOKE_LLM_URL to enable)",
+    "policy_integration: integration tests against a real LLM (same gate as smoke: CAPTION_AGENT_SMOKE_LLM_URL)",
+]

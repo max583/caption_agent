@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Проекты — Caption Agent{% endblock %}
+{% block nav_projects %}active{% endblock %}
+
+{% block content %}
+
+{% include "partials/server_summary.html" %}
+
+<div class="flex items-center justify-between mb-4">
+  <h1 class="section-title mb-0">{{ t['page_projects'] }}</h1>
+  <button class="btn-primary"
+          x-data
+          @click="$dispatch('open-create-project')">
+    + {{ t['btn_create_project'] }}
+  </button>
+</div>
+
+{% if not cards %}
+<div class="card p-12 text-center text-gray-500">
+  <p class="text-2xl mb-2">📂</p>
+  <p class="mb-4">{{ t['lbl_no_projects'] }}</p>
+  <button class="btn-primary" @click="$dispatch('open-create-project')">
+    {{ t['btn_create_first'] }}
+  </button>
+</div>
+{% else %}
+<div id="project-cards" class="flex flex-col gap-3">
+  {% for card in cards %}
+  {% include "partials/project_card.html" %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Create project modal -->
+<div x-data="createProjectModal()" @open-create-project.window="open = true">
+  <template x-if="open">
+    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+         @keydown.escape.window="open = false">
+      <div class="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-md p-6"
+           @click.stop>
+        <h2 class="text-lg font-semibold mb-4">{{ t['lbl_create_project_title'] }}</h2>
+        <form @submit.prevent="submit">
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_name_field'] }}</label>
+            <input x-model="form.name" class="input w-full" placeholder="My Character v001" autofocus required>
+            <p x-show="error" x-text="error" class="text-red-400 text-xs mt-1"></p>
+          </div>
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_description_field'] }}</label>
+            <input x-model="form.description" class="input w-full" :placeholder="window._t?.lbl_desc_placeholder || 'Brief description...'">
+          </div>
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_lora_type'] }}</label>
+            <select x-model="form.lora_type" class="input w-full">
+              <option value="character">{{ t['lora_type_character'] }}</option>
+              <option value="creature">{{ t['lora_type_creature'] }}</option>
+              <option value="style">{{ t['lora_type_style'] }}</option>
+              <option value="clothing">{{ t['lora_type_clothing'] }}</option>
+              <option value="pose">{{ t['lora_type_pose'] }}</option>
+              <option value="object">{{ t['lora_type_object'] }}</option>
+              <option value="face">{{ t['lora_type_face'] }}</option>
+            </select>
+          </div>
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_base_model_family'] }}</label>
+            <input x-model="form.base_model_family" class="input w-full font-mono"
+                   :placeholder="window._t?.lbl_base_model_hint || 'flux, sdxl, sd15…'" spellcheck="false">
+          </div>
+          <div class="flex gap-3 justify-end mt-6">
+            <button type="button" class="btn-secondary" @click="open = false">{{ t['btn_cancel'] }}</button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              <span x-show="loading">{{ t['lbl_loading_create'] }}</span>
+              <span x-show="!loading">{{ t['btn_create'] }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function createProjectModal() {
+  return {
+    open: false,
+    loading: false,
+    error: '',
+    form: { name: '', description: '', lora_type: 'character', base_model_family: 'flux' },
+    async submit() {
+      this.error = '';
+      if (!this.form.name.trim()) { this.error = window._t?.lbl_name_required_err || 'Name is required'; return; }
+      this.loading = true;
+      try {
+        const resp = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form),
+        });
+        if (!resp.ok) {
+          const data = await resp.json();
+          this.error = data.detail || (window._t?.lbl_create_error || 'Create failed');
+          return;
+        }
+        const project = await resp.json();
+        window.location.href = `/projects/${project.id}`;
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

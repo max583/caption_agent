@@ -1,0 +1,595 @@
+{% extends "base.html" %}
+{% block title %}{{ t['lbl_settings_title'] }} — Caption Agent{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<h1 class="section-title">{{ t['lbl_settings_title'] }}</h1>
+
+<div class="flex gap-5">
+  <!-- Left sidebar -->
+  <div class="w-48 flex-shrink-0">
+    <nav class="card overflow-hidden">
+      {% set section_labels = {
+        'llm': 'LLM',
+        'retry': t['settings_section_retry'],
+        'polling': t['settings_section_polling'],
+        'paths': t['settings_section_paths'],
+        'logging': t['settings_section_logging'],
+        'database': t['settings_section_database'],
+        'ui': t['settings_ui_section'],
+      } %}
+      {% for s in sections %}
+      <a href="/settings/{{ s }}"
+         class="block px-4 py-2.5 text-sm border-b border-gray-800 last:border-0 hover:bg-gray-800 transition-colors
+                {% if s == section %}text-white bg-gray-800 font-medium{% else %}text-gray-400{% endif %}">
+        {{ section_labels.get(s, s) }}
+      </a>
+      {% endfor %}
+    </nav>
+  </div>
+
+  <!-- Right pane -->
+  <div class="flex-1">
+    <div class="card p-6">
+      {% if section == 'llm' %}
+      <!-- ===== LLM Profiles ===== -->
+      <!-- Profile data injected via <script> to avoid double-quote collision
+           between the HTML attribute boundary and JSON string values. -->
+      <script>
+        window._llmProfileIds     = {{ profiles | map(attribute='id')        | list | tojson }};
+        window._llmProfileNames   = {{ profiles | map(attribute='name')      | list | tojson }};
+        window._llmProfileActives = {{ profiles | map(attribute='is_active') | list | tojson }};
+      </script>
+      <div id="llm-profiles"
+           x-data="llmProfiles(window._llmProfileIds, window._llmProfileNames, window._llmProfileActives)"
+           class="mb-7">
+        <h2 class="text-base font-semibold mb-3">{{ t['settings_lbl_profiles'] }}</h2>
+
+        <!-- Profile row: dropdown + action buttons -->
+        <div class="flex flex-wrap items-center gap-3 mb-3">
+          <select x-model="selectedId" class="input text-sm w-56"
+                  :disabled="profileIds.length === 0">
+            <option value="">{{ t['settings_select_profile'] }}</option>
+            <template x-for="(id, i) in profileIds" :key="id">
+              <option :value="String(id)"
+                      x-text="profileNames[i] + (profileActives[i] ? ' ●' : '')">
+              </option>
+            </template>
+          </select>
+
+          <button class="btn-secondary text-xs" @click="activate()"
+                  :disabled="!selectedId || activating">
+            <span x-show="!activating">{{ t['btn_activate'] }}</span>
+            <span x-show="activating" x-cloak>…</span>
+          </button>
+
+          <button class="btn-ghost text-xs" @click="testProfile()"
+                  :disabled="!selectedId || testing">
+            <span x-show="!testing">{{ t['btn_test_connection'] }}</span>
+            <span x-show="testing" x-cloak>…</span>
+          </button>
+
+          <button class="btn-ghost text-xs" @click="openRename()"
+                  :disabled="!selectedId">{{ t['btn_rename'] }}</button>
+
+          <button class="btn-ghost text-xs text-red-400" @click="deleteProfile()"
+                  :disabled="!selectedId">{{ t['btn_delete'] }}</button>
+        </div>
+
+        <!-- Test result line (fixed height so it doesn't shift buttons) -->
+        <div class="h-5 mt-1 mb-2">
+          <span class="text-xs text-green-400" x-show="testResult && testResult.ok" x-cloak
+                x-text="testResult ? `✓ ${testResult.model_id}  ${testResult.latency_ms} ms` : ''"></span>
+          <span class="text-xs text-red-400" x-show="testResult && !testResult.ok" x-cloak
+                x-text="testResult ? `✗ ${testResult.error}` : ''"></span>
+        </div>
+
+        <!-- No profiles hint -->
+        <p class="text-xs text-yellow-500 mb-1" x-show="profileIds.length === 0">
+          {{ t['lbl_no_profiles_hint'] }}
+        </p>
+
+        <!-- Save-as new profile -->
+        <button class="btn-secondary text-xs" @click="openSave()">
+          {{ t['btn_save_as_profile'] }}
+        </button>
+
+        <!-- Save modal -->
+        <div x-show="showSaveModal" x-cloak
+             class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+             @click.self="showSaveModal=false">
+          <div class="card p-6 w-80 space-y-4">
+            <h3 class="text-sm font-semibold">{{ t['lbl_new_profile_title'] }}</h3>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ t['lbl_profile_name'] }}</label>
+              <input type="text" x-model="newName" class="input w-full text-sm"
+                     placeholder="Ollama local" @keydown.enter="saveNew()">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">{{ t['lbl_profile_desc'] }}</label>
+              <input type="text" x-model="newDesc" class="input w-full text-sm">
+            </div>
+            <div class="flex gap-3 justify-end">
+              <button class="btn-ghost text-xs" @click="showSaveModal=false">{{ t['btn_cancel'] }}</button>
+              <button class="btn-secondary text-xs" @click="saveNew()" :disabled="!newName.trim()">{{ t['btn_save'] }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rename modal -->
+        <div x-show="showRenameModal" x-cloak
+             class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+             @click.self="showRenameModal=false">
+          <div class="card p-6 w-80 space-y-4">
+            <h3 class="text-sm font-semibold">{{ t['lbl_rename_profile_title'] }}</h3>
+            <input type="text" x-model="renameName" class="input w-full text-sm"
+                   @keydown.enter="rename()">
+            <div class="flex gap-3 justify-end">
+              <button class="btn-ghost text-xs" @click="showRenameModal=false">{{ t['btn_cancel'] }}</button>
+              <button class="btn-secondary text-xs" @click="rename()" :disabled="!renameName.trim()">{{ t['btn_save'] }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== LLM Section ===== -->
+      {% set llm = cfg.get('llm', {}) %}
+      <h2 class="text-base font-semibold mb-5">{{ t['lbl_llm_main_config'] }}</h2>
+      <div id="llm-form" class="space-y-4" x-data='settingsSection("llm", {{ llm | tojson }})'>
+        {% for field, label, type, placeholder in [
+          ('base_url', 'Base URL', 'text', 'http://localhost:1234/v1'),
+          ('api_key', 'API Key', 'password', ''),
+          ('model_id', 'Model ID', 'text', 'qwen3.6-35b-a3b'),
+          ('temperature', 'Temperature', 'number', '0.2'),
+          ('request_timeout', 'Request Timeout (s)', 'number', '600'),
+          ('max_retries', 'Max Retries', 'number', '4'),
+          ('max_tokens', 'Max Tokens (0 = default)', 'number', '0'),
+          ('context_length', 'Context Length (0 = default)', 'number', '0'),
+        ] %}
+        <div class="flex items-center gap-4">
+          <label class="w-48 text-sm text-gray-400 flex-shrink-0">{{ label }}</label>
+          <input type="{{ type }}"
+                 x-model="form.{{ field }}"
+                 @blur="saveField('{{ field }}')"
+                 class="input flex-1"
+                 placeholder="{{ placeholder }}"
+                 {% if type == 'number' %}step="any"{% endif %}>
+          <span class="text-xs text-green-400 w-16" x-show="saved === '{{ field }}'" x-transition>{{ t['lbl_saved_indicator'] }}</span>
+        </div>
+        {% endfor %}
+        <!-- S1: connection test button -->
+        <div class="flex items-center gap-4 pt-2" x-data="llmTestButton(null)">
+          <span class="w-48 flex-shrink-0"></span>
+          <button class="btn-secondary text-xs" @click="test()" :disabled="testing">
+            <span x-show="!testing">{{ t['lbl_check_connection'] }}</span>
+            <span x-show="testing" x-cloak>…</span>
+          </button>
+          <span class="text-xs text-green-400" x-show="result && result.ok" x-cloak
+                x-text="result ? `✓ ${result.model_id}  ${result.latency_ms} ms` : ''"></span>
+          <span class="text-xs text-red-400" x-show="result && !result.ok" x-cloak
+                x-text="result ? `✗ ${result.error}` : ''"></span>
+        </div>
+      </div>
+
+      <!-- Per-step LLM overrides -->
+      <h2 class="text-base font-semibold mt-8 mb-5">{{ t['lbl_llm_per_step'] }}</h2>
+      {% for step in ['analyst', 'normalizer', 'checker'] %}
+      {% set step_key = 'llm_' + step %}
+      {% set step_cfg = cfg.get(step_key, {}) %}
+      <div class="mb-4 border border-gray-800 rounded-lg overflow-hidden">
+        <div class="bg-gray-800/50 px-4 py-2 text-sm font-medium text-gray-300">{{ step }}</div>
+        <div class="p-4 space-y-3" x-data='settingsSection("{{ step_key }}", {{ step_cfg | tojson }})'>
+          {% for field, label, ftype in [
+            ('base_url',    'Base URL',    'text'),
+            ('api_key',     'API Key',     'password'),
+            ('model_id',    'Model ID',    'text'),
+            ('temperature', 'Temperature', 'text'),
+          ] %}
+          <div>
+            <div class="flex items-center gap-4"{% if ftype == 'password' %} x-data="{ showKey_{{ step }}: false }"{% endif %}>
+              <label class="w-40 text-xs text-gray-400 flex-shrink-0">{{ label }}</label>
+              {% if ftype == 'password' %}
+              <div class="flex flex-1 items-center gap-1">
+                <input :type="showKey_{{ step }} ? 'text' : 'password'"
+                       x-model="form.{{ field }}"
+                       @blur="saveField('{{ field }}')"
+                       class="input flex-1 text-xs"
+                       placeholder="inherited from main">
+                <button type="button" class="btn-ghost text-xs px-1.5 py-1"
+                        @click="showKey_{{ step }} = !showKey_{{ step }}"
+                        :title="showKey_{{ step }} ? (window._t?.lbl_hide || 'Hide') : (window._t?.lbl_show || 'Show')">
+                  <span x-text="showKey_{{ step }} ? '🙈' : '👁'"></span>
+                </button>
+              </div>
+              {% else %}
+              <input type="{{ ftype }}"
+                     x-model="form.{{ field }}"
+                     @blur="saveField('{{ field }}')"
+                     class="input flex-1 text-xs"
+                     placeholder="inherited from main">
+              {% endif %}
+              <span class="text-xs text-green-400 w-16" x-show="saved === '{{ field }}'" x-transition>✓</span>
+              <button class="btn-ghost text-xs px-2 py-1" title="{{ t['lbl_reset_to_main'] }}"
+                      @click="clearField('{{ field }}')">↺</button>
+            </div>
+            {% if field == 'api_key' %}
+            <p class="text-xs text-gray-600 mt-0.5 ml-44">
+              Env: <code class="font-mono">CAPTION_AGENT_{{ step | upper }}_LLM_API_KEY</code> takes precedence
+            </p>
+            {% endif %}
+          </div>
+          {% endfor %}
+          <div class="flex items-center gap-3 pt-1">
+            <button class="btn-ghost text-xs" @click="clearAll()">{{ t['settings_clear_overrides'] }}</button>
+            <!-- S1: per-step test button -->
+            <span x-data="llmTestButton('{{ step }}')">
+              <button class="btn-ghost text-xs" @click="test()" :disabled="testing">
+                <span x-show="!testing">{{ t['btn_test_connection'] }}</span>
+                <span x-show="testing" x-cloak>…</span>
+              </button>
+              <span class="text-xs text-green-400" x-show="result && result.ok" x-cloak
+                    x-text="result ? `✓ ${result.latency_ms}ms` : ''"></span>
+              <span class="text-xs text-red-400" x-show="result && !result.ok" x-cloak
+                    x-text="result ? `✗ ${result.error}` : ''"></span>
+            </span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% elif section == 'retry' %}
+      {% set retry = cfg.get('retry', {}) %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_section_retry'] }}</h2>
+      <div class="space-y-4" x-data='settingsSection("retry", {{ retry | tojson }})'>
+        {% for field, label_key in [
+          ('normalizer_max_self_retries', 'settings_normalizer_retries'),
+          ('consecutive_failure_threshold', 'settings_consecutive_threshold'),
+        ] %}
+        <div class="flex items-center gap-4">
+          <label class="w-64 text-sm text-gray-400 flex-shrink-0">{{ t[label_key] }}</label>
+          <input type="number" x-model.number="form.{{ field }}" @blur="saveField('{{ field }}')"
+                 class="input w-24" min="0">
+          <span class="text-xs text-green-400" x-show="saved === '{{ field }}'" x-transition>{{ t['lbl_saved_indicator'] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% elif section == 'polling' %}
+      {% set polling = cfg.get('polling', {}) %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_section_polling'] }}</h2>
+      <div class="space-y-4" x-data='settingsSection("polling", {{ polling | tojson }})'>
+        {% for field, label_key in [
+          ('projects_list',      'settings_poll_projects_list'),
+          ('project_workspace',  'settings_poll_project_workspace'),
+          ('batch_processing',   'settings_poll_batch_processing'),
+          ('batch_idle',         'settings_poll_batch_idle'),
+        ] %}
+        <div class="flex items-center gap-4">
+          <label class="w-48 text-sm text-gray-400 flex-shrink-0">{{ t[label_key] }}</label>
+          <input type="number" x-model.number="form.{{ field }}" @blur="saveField('{{ field }}')"
+                 class="input w-24" min="5">
+          <span class="text-xs text-green-400" x-show="saved === '{{ field }}'" x-transition>✓</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% elif section == 'logging' %}
+      {% set logging = cfg.get('logging', {}) %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_section_logging'] }}</h2>
+      <div class="space-y-4" x-data='settingsSection("logging", {{ logging | tojson }})'>
+        <!-- S2: log level selector -->
+        <div class="flex items-center gap-4">
+          <label class="w-64 text-sm text-gray-400">{{ t['settings_log_level'] }}</label>
+          <select x-model="form.log_level" @change="saveField('log_level')" class="input w-36">
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+          <span class="text-xs text-green-400" x-show="saved === 'log_level'" x-transition>{{ t['lbl_applied_indicator'] }}</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <label class="w-64 text-sm text-gray-400">{{ t['settings_log_retention'] }}</label>
+          <input type="number" x-model.number="form.business_log_retention_days"
+                 @blur="saveField('business_log_retention_days')"
+                 class="input w-24" min="1">
+          <span class="text-xs text-green-400" x-show="saved === 'business_log_retention_days'" x-transition>✓</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <label class="w-64 text-sm text-gray-400">Debug: dump LLM I/O</label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" x-model="form.debug_dump_llm_io"
+                   @change="saveField('debug_dump_llm_io')"
+                   class="rounded">
+            <span class="text-sm text-gray-300">{{ t['settings_log_enable'] }}</span>
+          </label>
+          <span class="text-xs text-green-400" x-show="saved === 'debug_dump_llm_io'" x-transition>✓</span>
+        </div>
+      </div>
+
+      {% elif section == 'paths' %}
+      {% set paths = cfg.get('paths', {}) %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_section_paths'] }}</h2>
+      <div class="space-y-4" x-data='settingsSection("paths", {{ paths | tojson }})'>
+        <div class="flex items-center gap-4">
+          <label class="w-48 text-sm text-gray-400">Default output policy</label>
+          <select x-model="form.default_output_policy" @change="saveField('default_output_policy')" class="input w-48">
+            <option value="source_folder">source_folder</option>
+          </select>
+          <span class="text-xs text-green-400" x-show="saved === 'default_output_policy'" x-transition>✓</span>
+        </div>
+      </div>
+      <div class="mt-6 p-4 bg-gray-800/50 rounded text-xs text-gray-500">
+        {{ t['settings_bootstrap_hint'] }}
+        <ul class="mt-2 space-y-1 font-mono">
+          <li>CAPTION_AGENT_DB_URL — DB connection string</li>
+          <li>CAPTION_AGENT_HOST / PORT — {{ t['settings_host_port'] }}</li>
+          <li>CAPTION_AGENT_DATA_DIR — {{ t['settings_data_dir'] }}</li>
+        </ul>
+      </div>
+
+      {% elif section == 'database' %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_section_database'] }}</h2>
+      <div class="p-4 bg-gray-800/50 rounded text-sm text-gray-400 mb-4">
+        {{ t['settings_db_conn_hint'] }} <code class="font-mono text-blue-400">CAPTION_AGENT_DB_URL</code>
+        ({{ t['settings_db_default_hint'] }}).
+      </div>
+      <div class="space-y-3 mb-8">
+        <h3 class="text-sm font-medium text-gray-300">{{ t['settings_db_integrity'] }}</h3>
+        <p class="text-xs text-gray-500">{{ t['settings_db_integrity_desc'] }}</p>
+        <button class="btn-secondary text-sm" x-data onclick="runIntegrityCheck()">
+          {{ t['settings_db_run_check'] }}
+        </button>
+        <div id="integrity-result" class="text-xs font-mono text-gray-400 hidden"></div>
+      </div>
+      <div class="space-y-3 border-t border-gray-800 pt-6">
+        <h3 class="text-sm font-medium text-gray-300">{{ t['settings_db_admin'] }}</h3>
+        <p class="text-xs text-gray-500">{{ t['settings_db_admin_desc'] }}</p>
+        <button class="btn-secondary text-sm" onclick="restartServer()">
+          {{ t['settings_db_restart'] }}
+        </button>
+        <div id="restart-status" class="text-xs text-gray-400 hidden"></div>
+      </div>
+      {% elif section == 'ui' %}
+      <h2 class="text-base font-semibold mb-5">{{ t['settings_ui_language'] }}</h2>
+      <div class="flex items-center gap-3">
+        <a href="?lang=ru"
+           class="btn-secondary text-sm {% if ui_lang == 'ru' %}ring-2 ring-blue-500{% endif %}">RU</a>
+        <a href="?lang=en"
+           class="btn-secondary text-sm {% if ui_lang == 'en' %}ring-2 ring-blue-500{% endif %}">EN</a>
+      </div>
+
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function settingsSection(key, initial) {
+  return {
+    form: { ...initial },
+    saved: null,
+    _timer: null,
+    async saveField(field) {
+      const resp = await fetch(`/api/config/${key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: this.form }),
+      });
+      if (resp.ok) {
+        this.saved = field;
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = setTimeout(() => { this.saved = null; }, 2500);
+      } else {
+        showToast(window._t?.lbl_save_error || 'Save error', 'error');
+      }
+    },
+    async clearField(field) {
+      this.form[field] = null;
+      await this.saveField(field);
+    },
+    async clearAll() {
+      const nulled = Object.fromEntries(Object.keys(this.form).map(k => [k, null]));
+      this.form = nulled;
+      const resp = await fetch(`/api/config/${key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: nulled }),
+      });
+      if (resp.ok) showToast(window._t?.lbl_overrides_cleared || 'Overrides cleared', 'info');
+    }
+  }
+}
+
+// LLM Profiles section component.
+// profileIds / profileNames / profileActives are parallel arrays from Jinja2.
+function llmProfiles(profileIds, profileNames, profileActives) {
+  // x-model on <select> always yields strings, so keep selectedId as string throughout.
+  const activeIdx = profileActives.indexOf(true);
+  const defaultId = activeIdx >= 0
+    ? String(profileIds[activeIdx])
+    : (profileIds.length ? String(profileIds[0]) : '');
+
+  return {
+    profileIds,
+    profileNames,
+    profileActives,
+    selectedId: defaultId,
+    activating: false,
+    testing: false,
+    testResult: null,
+    showSaveModal: false,
+    showRenameModal: false,
+    newName: '',
+    newDesc: '',
+    renameName: '',
+
+    get activeProfileName() {
+      const i = this.profileActives.indexOf(true);
+      return i >= 0 ? this.profileNames[i] : '';
+    },
+
+    _selectedIndex() {
+      return this.profileIds.indexOf(Number(this.selectedId));
+    },
+
+    async activate() {
+      if (!this.selectedId) return;
+      this.activating = true;
+      try {
+        const r = await fetch(`/api/llm-profiles/${this.selectedId}/activate`, { method: 'POST' });
+        if (r.ok) {
+          showToast(window._t?.lbl_profile_activated || 'Profile activated', 'info');
+          setTimeout(() => location.reload(), 800);
+        } else {
+          showToast(window._t?.lbl_activation_error || 'Activation error', 'error');
+        }
+      } catch { showToast(window._t?.lbl_request_error || 'Request error', 'error'); }
+      finally { this.activating = false; }
+    },
+
+    async testProfile() {
+      if (!this.selectedId) return;
+      this.testing = true;
+      this.testResult = null;
+      try {
+        const r = await fetch(`/api/config/llm/test?profile_id=${this.selectedId}`, { method: 'POST' });
+        this.testResult = await r.json();
+      } catch {
+        this.testResult = { ok: false, error: window._t?.lbl_request_error || 'Request error' };
+      } finally {
+        this.testing = false;
+      }
+    },
+
+    async deleteProfile() {
+      if (!this.selectedId) return;
+      if (!confirm(window._t?.confirm_delete_profile || 'Delete profile?')) return;
+      const r = await fetch(`/api/llm-profiles/${this.selectedId}`, { method: 'DELETE' });
+      if (r.status === 204) {
+        location.reload();
+      } else if (r.status === 409) {
+        showToast(window._t?.lbl_cannot_delete_active || 'Cannot delete active profile', 'error');
+      } else {
+        showToast(window._t?.lbl_delete_error || 'Delete error', 'error');
+      }
+    },
+
+    openSave() { this.newName = ''; this.newDesc = ''; this.showSaveModal = true; },
+
+    openRename() {
+      const i = this._selectedIndex();
+      this.renameName = i >= 0 ? this.profileNames[i] : '';
+      this.showRenameModal = true;
+    },
+
+    async saveNew() {
+      if (!this.newName.trim()) return;
+      const r = await fetch('/api/llm-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: this.newName.trim(), description: this.newDesc.trim() || null }),
+      });
+      if (r.ok) {
+        this.showSaveModal = false;
+        location.reload();
+      } else if (r.status === 409) {
+        showToast(window._t?.lbl_profile_exists || 'Profile already exists', 'error');
+      } else {
+        showToast(window._t?.lbl_save_error || 'Save error', 'error');
+      }
+    },
+
+    async rename() {
+      if (!this.selectedId || !this.renameName.trim()) return;
+      const r = await fetch(`/api/llm-profiles/${this.selectedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: this.renameName.trim() }),
+      });
+      if (r.ok) {
+        this.showRenameModal = false;
+        location.reload();
+      } else if (r.status === 409) {
+        showToast(window._t?.lbl_name_taken || 'Name already taken', 'error');
+      } else {
+        showToast(window._t?.lbl_rename_error || 'Rename error', 'error');
+      }
+    },
+  };
+}
+
+// S1: LLM connection test button component.
+// step: null = test main LLM config; 'analyst'|'normalizer'|'checker' = test per-step.
+function llmTestButton(step) {
+  return {
+    testing: false,
+    result: null,
+    async test() {
+      this.testing = true;
+      this.result = null;
+      try {
+        const url = step ? `/api/config/llm/test?step=${step}` : '/api/config/llm/test';
+        const resp = await fetch(url, { method: 'POST' });
+        this.result = await resp.json();
+      } catch {
+        this.result = { ok: false, error: window._t?.lbl_request_error || 'Request error' };
+      } finally {
+        this.testing = false;
+      }
+    },
+    // Test against a specific profile without activating it.
+    async testProfile() {
+      const profilesEl = this.$el.closest('#llm-profiles');
+      const profileId = profilesEl ? profilesEl._x_dataStack?.[0]?.selectedId : null;
+      if (!profileId) { this.result = { ok: false, error: window._t?.lbl_profile_not_selected || 'No profile selected' }; return; }
+      this.testing = true;
+      this.result = null;
+      try {
+        const url = `/api/config/llm/test?profile_id=${profileId}`;
+        const resp = await fetch(url, { method: 'POST' });
+        this.result = await resp.json();
+      } catch {
+        this.result = { ok: false, error: window._t?.lbl_request_error || 'Request error' };
+      } finally {
+        this.testing = false;
+      }
+    }
+  }
+}
+
+async function restartServer() {
+  const el = document.getElementById('restart-status');
+  el.classList.remove('hidden');
+  el.textContent = window._t?.lbl_sending_request || 'Sending request...';
+  try {
+    const resp = await fetch('/api/admin/restart', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      el.textContent = window._t?.lbl_server_restarting || 'Server restarting. Page will refresh in 4 seconds...';
+      setTimeout(() => location.reload(), 4000);
+    } else {
+      el.textContent = (window._t?.lbl_restart_error_prefix || 'Error: ') + (data.message || (window._t?.lbl_unknown_error || 'unknown error'));
+    }
+  } catch {
+    el.textContent = window._t?.lbl_connection_error_restart || 'Connection error. Refresh the page manually.';
+  }
+}
+
+async function runIntegrityCheck() {
+  const el = document.getElementById('integrity-result');
+  el.classList.remove('hidden');
+  el.textContent = window._t?.lbl_checking || 'Checking...';
+  try {
+    const resp = await fetch('/api/summary');
+    const data = await resp.json();
+    el.textContent = JSON.stringify(data, null, 2);
+  } catch {
+    el.textContent = window._t?.lbl_request_error || 'Request error';
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}{{ batch.name }} — {{ project.name }} — Caption Agent{% endblock %}
+{% block nav_projects %}active{% endblock %}
+
+{% block content %}
+
+<!-- Breadcrumb -->
+<div class="text-sm text-gray-500 mb-4 flex items-center gap-2">
+  <a href="/" class="hover:text-gray-300">{{ t['lbl_projects_breadcrumb'] }}</a>
+  <span>/</span>
+  <a href="/projects/{{ project.id }}" class="hover:text-gray-300">{{ project.name }}</a>
+  <span>/</span>
+  <span class="text-gray-300">{{ batch.name }}</span>
+</div>
+
+<!-- Batch header card -->
+<div class="card p-5 mb-5">
+  <div class="flex items-start justify-between mb-4">
+    <div>
+      <h1 class="text-xl font-bold text-white">{{ batch.name }}</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Batch #{{ batch.id }} · проект: {{ project.name }} #{{ project.id }}</p>
+    </div>
+    <div class="flex gap-2">
+      <a href="/projects/{{ project.id }}" class="btn-ghost text-xs">{{ t['lbl_back'] }}</a>
+    </div>
+  </div>
+  {% set poll_interval = poll_interval %}
+  {% include "partials/batch_header.html" %}
+</div>
+
+<!-- Tabs -->
+<div class="border-b border-gray-800 mb-5">
+  <div class="flex gap-0">
+    <a href="?tab=overview"
+       class="tab-link {% if tab == 'overview' %}tab-active{% endif %}">{{ t['tab_overview'] }}</a>
+    <a href="?tab=items"
+       class="tab-link {% if tab == 'items' %}tab-active{% endif %}">{{ t['tab_items'] }}
+      {% if batch_out.awaiting_review_items > 0 %}
+      <span class="ml-1 bg-yellow-500/20 text-yellow-400 rounded-full text-xs px-1.5">{{ batch_out.awaiting_review_items }}</span>
+      {% endif %}
+    </a>
+    <a href="?tab=review"
+       class="tab-link {% if tab == 'review' %}tab-active{% endif %}">{{ t['tab_review'] }}</a>
+  </div>
+</div>
+
+<style>
+.tab-link { padding:.625rem 1.25rem; font-size:.875rem; color:#9ca3af; border-bottom:2px solid transparent; transition:color 150ms; margin-bottom:-1px; text-decoration:none; display:inline-block; }
+.tab-link:hover { color:#fff; }
+.tab-active { color:#fff; border-bottom-color:#3b82f6; }
+</style>
+
+<!-- Tab content -->
+{% if tab == 'overview' %}
+<!-- ====== OVERVIEW TAB ====== -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+  <!-- Item state summary -->
+  <div class="card p-5">
+    <h2 class="text-sm font-semibold text-gray-300 mb-3">{{ t['lbl_items_by_state'] }}</h2>
+    <div class="space-y-2 text-sm">
+      {% set state_icons = {'approved': '✓', 'awaiting_review': '⏳', 'error': '⚠', 'skipped': '→', 'dropped': '✗', 'done': '✓', 'queued': '·', 'processing': '⟳'} %}
+      {% for state, count in [
+        ('approved', batch_out.approved_items),
+        ('awaiting_review', batch_out.awaiting_review_items),
+        ('error', batch_out.error_items),
+        ('skipped', batch_out.skipped_items),
+        ('dropped', batch_out.dropped_items),
+        ('queued', batch_out.queued_items),
+        ('processing', batch_out.processing_items),
+      ] %}
+      {% if count > 0 %}
+      <div class="flex justify-between">
+        <span class="text-gray-400">{{ state_icons.get(state, '·') }} {{ state }}</span>
+        <span class="font-mono text-white">{{ count }}</span>
+      </div>
+      {% endif %}
+      {% endfor %}
+      {% if batch_out.total_items == 0 %}
+      <p class="text-gray-600 italic">{{ t['lbl_no_items_scan'] }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- State history -->
+  <div class="card p-5">
+    <h2 class="text-sm font-semibold text-gray-300 mb-3">{{ t['lbl_state_history'] }}</h2>
+    <div class="space-y-1">
+      {% for h in batch_out.state_history | reverse %}
+      <div class="flex items-start gap-3 text-xs">
+        <span class="text-gray-600 font-mono flex-shrink-0">{{ h.changed_at.strftime('%m-%d %H:%M') }}</span>
+        <span class="text-gray-400">→ <span class="badge state-{{ h.to_state }}">{{ h.to_state }}</span></span>
+        {% if h.reason %}<span class="text-gray-600 truncate">{{ h.reason }}</span>{% endif %}
+      </div>
+      {% else %}
+      <p class="text-gray-600 text-xs italic">{{ t['lbl_state_history_empty'] }}</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Recent errors -->
+{% set error_items = items | selectattr('state', 'equalto', 'error') | list %}
+{% if error_items %}
+<div class="card p-5 mt-5">
+  <h2 class="text-sm font-semibold text-red-400 mb-3">{{ t['lbl_errors_section'] }}</h2>
+  {% for item in error_items[:10] %}
+  <div class="flex items-start gap-3 text-xs border-b border-gray-800/50 py-2">
+    <span class="font-mono text-gray-400">{{ item.file_name }}</span>
+    <span class="text-red-400">{{ item.last_error_category }}</span>
+    <span class="text-gray-500 truncate">{{ item.last_error_message }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% elif tab == 'items' %}
+<!-- ====== ITEMS TAB ====== -->
+{% include "partials/batch_items.html" %}
+
+{% elif tab == 'review' %}
+<!-- ====== REVIEW TAB ====== -->
+<div class="flex gap-4 h-[calc(100vh-20rem)]" x-data="reviewTab({{ batch.id }}, {{ selected_item.id if selected_item else 'null' }})">
+
+  <!-- Left: items list -->
+  <div class="w-56 flex-shrink-0 border border-gray-800 rounded overflow-y-auto bg-gray-950">
+    {% for item in items %}
+    {% set warning_count = item.warnings | length if item.warnings else 0 %}
+    <div class="flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-gray-800/50 hover:bg-gray-900 transition-colors text-xs"
+         :class="{ 'bg-blue-900/30 border-l-2 border-l-blue-500': selectedItemId === {{ item.id }} }"
+         @click="selectItem({{ item.id }})"
+         id="review-row-{{ item.id }}">
+      <span class="flex-shrink-0">
+        {% if item.state == 'approved' %}✓{% elif item.state == 'error' %}⚠{% elif item.state == 'dropped' %}✗{% else %}⏳{% endif %}
+      </span>
+      <span class="truncate font-mono text-gray-300">{{ item.file_name }}</span>
+      {% if warning_count > 0 %}
+      <span class="flex-shrink-0 text-yellow-400 font-bold">{{ warning_count }}</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="p-4 text-gray-500 text-xs">{{ t['lbl_no_items'] }}</div>
+    {% endfor %}
+  </div>
+
+  <!-- Right: item detail -->
+  <div class="flex-1 border border-gray-800 rounded bg-gray-950 overflow-y-auto flex flex-col">
+    <div id="review-detail" class="flex-1 p-4 overflow-y-auto">
+      {% if selected_item %}
+      {% set item = selected_item %}
+      {% include "partials/item_detail.html" %}
+      {% else %}
+      <p class="text-gray-500 text-sm">{{ t['lbl_select_item_review'] }}</p>
+      {% endif %}
+    </div>
+
+    <!-- Decision buttons -->
+    <div class="border-t border-gray-800 p-4 flex items-center gap-2 flex-shrink-0"
+         x-show="selectedItemId !== null">
+      <button class="btn-primary text-xs" @click="decide('accept')" title="A">{{ t['btn_accept'] }} (A)</button>
+      <button class="btn-secondary text-xs" @click="decide('regenerate')" title="R">{{ t['btn_regenerate'] }} (R)</button>
+      <button class="btn-danger text-xs" @click="decide('drop')" title="D">{{ t['btn_drop'] }} (D)</button>
+      <button class="btn-ghost text-xs" @click="decide('skip')" title="S">{{ t['btn_skip'] }} (S)</button>
+      <div class="flex-1"></div>
+      <button class="btn-ghost text-xs" @click="prevItem()" title="←">← Prev</button>
+      <button class="btn-ghost text-xs" @click="nextItem()" title="→">Next →</button>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Batch lifecycle actions from header buttons.
+function batchLifecycle(batchId, action) {
+  const labels = {
+    pause: window._t?.btn_pause || 'Pause',
+    resume: window._t?.btn_resume || 'Resume',
+    abort: window._t?.btn_abort || 'Abort',
+    export: window._t?.btn_export || 'Export',
+  };
+  if (!confirm(`${labels[action] || action}?`)) return;
+  fetch(`/api/batches/${batchId}/${action}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.detail) showToast(d.detail, 'error');
+      else { showToast(`${labels[action] || action} ${window._t?.lbl_action_done || 'done'}`, 'info'); htmx.trigger('#batch-header', 'refreshBatchHeader'); }
+    }).catch(() => showToast(window._t?.lbl_error_generic || 'Error', 'error'));
+}
+
+function scanBatch(batchId) {
+  fetch(`/api/batches/${batchId}/scan`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.detail) showToast(d.detail, 'error');
+      else { showToast(window._t?.lbl_scan_complete || 'Scan complete', 'info'); location.reload(); }
+    }).catch(() => showToast(window._t?.lbl_error_generic || 'Error', 'error'));
+}
+
+// Items tab.
+function itemsTable(batchId, states) {
+  return {
+    activeFilter: 'awaiting_review',
+    states: states || [],
+    selectedIds: new Set(),
+    expandedId: null,
+    includeWithWarnings: false,
+    init() {
+      // Restore filter from sessionStorage (survives tab navigation, clears on tab close).
+      const saved = sessionStorage.getItem('items_filter');
+      if (saved !== null) {
+        this.activeFilter = JSON.parse(saved);  // null → show all, string → filter by state
+      }
+    },
+    get allSelected() { return false; },
+    // Number of rows visible under the active filter (drives the empty-filter message).
+    get visibleCount() {
+      return this.states.filter(s => this.matchesFilter(s)).length;
+    },
+    // Per-row predicate used by x-show. null filter = show all.
+    matchesFilter(state) {
+      return this.activeFilter === null || state === this.activeFilter;
+    },
+    setFilter(f) {
+      this.activeFilter = f;
+      // Persist the chosen filter for the duration of this browser session.
+      sessionStorage.setItem('items_filter', JSON.stringify(f));
+      // Drop selection when the filter changes so mass actions never touch hidden rows.
+      this.selectedIds = new Set();
+      this.expandedId = null;
+    },
+    toggleItem(id, checked) {
+      if (checked) this.selectedIds.add(id);
+      else this.selectedIds.delete(id);
+    },
+    toggleAll(checked) {
+      // Only affect rows currently visible under the active filter.
+      document.querySelectorAll('#items-table tbody tr[data-item-id]').forEach(row => {
+        if (row.offsetParent === null) return;  // hidden by the active filter
+        const id = parseInt(row.dataset.itemId, 10);
+        const cb = row.querySelector('input[type=checkbox]');
+        if (checked) this.selectedIds.add(id); else this.selectedIds.delete(id);
+        if (cb) cb.checked = checked;
+      });
+    },
+    toggleExpand(id) { this.expandedId = this.expandedId === id ? null : id; },
+    async massAction(decision) {
+      const ids = [...this.selectedIds];
+      if (ids.length === 0) return;
+      if (!confirm(`Применить "${decision}" к ${ids.length} item(s)?`)) return;
+      const payload = {
+        decision,
+        item_ids: ids,
+        include_with_warnings: this.includeWithWarnings,
+      };
+      const r = await fetch(`/api/batches/${batchId}/items/mass-decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (d.detail) showToast(d.detail, 'error');
+      else { showToast(`${d.applied} item(s) обновлено`, 'info'); location.reload(); }
+    }
+  }
+}
+
+// Review tab.
+function reviewTab(batchId, initialItemId) {
+  return {
+    selectedItemId: initialItemId,
+    itemIds: {{ items | map(attribute='id') | list | tojson }},
+    async selectItem(id) {
+      this.selectedItemId = id;
+      const resp = await fetch(`/partials/items/${id}/detail`);
+      document.getElementById('review-detail').innerHTML = await resp.text();
+      // Update URL without reload.
+      history.replaceState(null, '', `?tab=review&item_id=${id}`);
+    },
+    async saveCaption() {
+      if (!this.selectedItemId) return;
+      const captionEl = document.getElementById('caption-edit');
+      if (!captionEl) return;
+      const caption = captionEl.value.trim();
+      if (!caption) return;
+      const r = await fetch(`/api/items/${this.selectedItemId}/caption`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption }),
+      });
+      if (r.ok) showToast('Caption сохранён', 'info');
+      else {
+        const d = await r.json();
+        showToast(d.detail || 'Ошибка', 'error');
+      }
+    },
+    async decide(decision) {
+      if (!this.selectedItemId) return;
+      const captionEl = document.getElementById('caption-edit');
+      const caption = captionEl ? captionEl.value.trim() || null : null;
+      const r = await fetch(`/api/items/${this.selectedItemId}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, caption }),
+      });
+      if (r.ok) {
+        showToast(decision, 'info');
+        // Update the list row icon.
+        const row = document.getElementById(`review-row-${this.selectedItemId}`);
+        if (row) {
+          const icon = row.querySelector('span:first-child');
+          if (icon) {
+            if (decision === 'accept') icon.textContent = '✓';
+            else if (decision === 'drop') icon.textContent = '✗';
+            else if (decision === 'skip') icon.textContent = '→';
+          }
+        }
+        this.nextItem();
+      } else {
+        const d = await r.json();
+        showToast(d.detail || 'Ошибка', 'error');
+      }
+    },
+    prevItem() {
+      const idx = this.itemIds.indexOf(this.selectedItemId);
+      if (idx > 0) this.selectItem(this.itemIds[idx - 1]);
+    },
+    nextItem() {
+      const idx = this.itemIds.indexOf(this.selectedItemId);
+      if (idx < this.itemIds.length - 1) this.selectItem(this.itemIds[idx + 1]);
+      else showToast('Все items просмотрены', 'info');
+    },
+    init() {
+      window.addEventListener('keydown', (e) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        if (e.key === 'a' || e.key === 'A') this.decide('accept');
+        else if (e.key === 'r' || e.key === 'R') this.decide('regenerate');
+        else if (e.key === 'd' || e.key === 'D') this.decide('drop');
+        else if (e.key === 's' || e.key === 'S') this.decide('skip');
+        else if (e.key === 'ArrowLeft') this.prevItem();
+        else if (e.key === 'ArrowRight') this.nextItem();
+      });
+    }
+  }
+}
+
+// Regenerate all error items in a batch and re-queue for processing.
+async function regenerateErrors(batchId, count) {
+  if (!confirm(`Регенерировать ${count} ошибочных item(s)?`)) return;
+  const r = await fetch(`/api/batches/${batchId}/items/mass-decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision: 'regenerate', state_filter: 'error' }),
+  });
+  const d = await r.json();
+  if (d.detail) showToast(d.detail, 'error');
+  else { showToast(`${d.applied} ошибок отправлено на регенерацию`, 'info'); location.reload(); }
+}
+
+// Queue batch (from Overview scan result).
+async function queueBatch(batchId) {
+  const r = await fetch(`/api/batches/${batchId}/queue`, { method: 'POST' });
+  if (r.ok) { showToast('Batch добавлен в очередь', 'info'); htmx.trigger('#batch-header', 'refreshBatchHeader'); }
+  else { const d = await r.json(); showToast(d.detail || 'Ошибка', 'error'); }
+}
+</script>
+{% endblock %}

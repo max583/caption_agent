@@ -1,0 +1,54 @@
+{% set dot_class = {
+  'error': 'bg-red-500',
+  'review': 'bg-yellow-400',
+  'active': 'bg-green-500',
+  'idle': 'bg-gray-500'
+} %}
+<div class="card p-4 hover:border-gray-700 transition-colors group relative"
+     x-data="{ menu: false }"
+     @click.self="window.location.href='/projects/{{ card.id }}'">
+  <div class="flex items-start gap-3 cursor-pointer"
+       @click="window.location.href='/projects/{{ card.id }}'">
+    <div class="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 {{ dot_class.get(card.status_category, 'bg-gray-500') }}"></div>
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold text-white text-sm">
+        {{ card.name }}
+        <span class="text-gray-500 font-normal text-xs ml-1">#{{ card.id }}</span>
+      </div>
+      {% if card.description %}
+      <div class="text-gray-400 text-xs mt-0.5 truncate">{{ card.description }}</div>
+      {% endif %}
+      <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs">
+        {% if card.error_batches > 0 %}
+        <span class="text-red-400">{{ card.error_batches }} {{ t['lbl_errors_batches'] }}</span>
+        {% endif %}
+        {% if card.awaiting_review_items > 0 %}
+        <span class="text-yellow-400">{{ card.awaiting_review_items }} {{ t['lbl_awaiting_review'] }}</span>
+        {% endif %}
+        {% if card.active_batches > 0 %}
+        <span class="text-green-400">{{ card.active_batches }} {{ t['lbl_active_batches'] }}</span>
+        {% endif %}
+        {% if card.total_batches == 0 %}
+        <span class="text-gray-500">{{ t['lbl_no_batches_card'] }}</span>
+        {% elif card.error_batches == 0 and card.awaiting_review_items == 0 and card.active_batches == 0 %}
+        <span class="text-gray-500">{{ card.total_batches }} batch{{ 'es' if card.total_batches != 1 else '' }}</span>
+        {% endif %}
+        {% if card.last_activity_at %}
+        <span class="text-gray-600">{{ card.last_activity_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Context menu -->
+  <button class="absolute top-3 right-3 text-gray-600 hover:text-gray-300 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+          @click.stop="menu = !menu">⋮</button>
+  <div x-show="menu" x-cloak
+       @click.outside="menu = false"
+       class="absolute right-3 top-10 bg-gray-800 border border-gray-700 rounded shadow-xl z-10 min-w-32">
+    <button class="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700"
+            @click.stop="deleteProject({{ card.id }}, '{{ card.name | e }}', {{ card.total_batches }})">
+      {{ t['btn_delete'] }}
+    </button>
+  </div>
+</div>

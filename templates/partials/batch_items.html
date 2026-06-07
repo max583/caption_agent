@@ -1,0 +1,147 @@
+<div id="items-table" x-data='itemsTable({{ batch.id }}, {{ items | map(attribute="state") | map("string") | list | tojson }})'>
+  <!-- Filter bar -->
+  <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+    <label class="text-xs text-gray-500">{{ t['lbl_filter'] }}:</label>
+    <select class="bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1 text-xs cursor-pointer"
+            :value="activeFilter ?? ''"
+            @change="setFilter($event.target.value === '' ? null : $event.target.value)">
+      <option value=""{% if items | length == 0 %} style="color: rgb(107 114 128);"{% endif %}>{{ t['lbl_all'] }} ({{ items | length }})</option>
+      {% for state in ['awaiting_review', 'error', 'approved', 'queued', 'regenerating',
+                       'dropped', 'skipped', 'analyzing', 'normalizing', 'rule_check',
+                       'llm_pass_check', 'reading_context', 'gap_filling', 'exporting'] %}
+      {% set count = items | selectattr('state', 'equalto', state) | list | length %}
+      <option value="{{ state }}"{% if count == 0 %} style="color: rgb(107 114 128);"{% endif %}>{{ state }} ({{ count }})</option>
+      {% endfor %}
+    </select>
+    <button class="ml-auto badge cursor-pointer bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-500"
+            hx-get="/partials/batches/{{ batch.id }}/items"
+            hx-target="#items-table"
+            hx-swap="outerHTML"
+            title="{{ t['btn_refresh'] }}">
+      ↻ {{ t['btn_refresh'] }}
+    </button>
+  </div>
+
+  <!-- Mass actions bar -->
+  <div class="flex flex-wrap items-center gap-3 mb-3 p-3 bg-gray-900 rounded border border-gray-800"
+       x-show="selectedIds.size > 0 || true">
+    <span class="text-xs text-gray-400" x-show="selectedIds.size > 0">
+      {{ t['lbl_selected_count'] }} <strong x-text="selectedIds.size"></strong>
+    </span>
+    <div class="relative" x-data="{ massMenu: false }">
+      <button class="btn-secondary text-xs" @click="massMenu = !massMenu" :disabled="selectedIds.size === 0">
+        {{ t['lbl_mass_actions'] }}
+      </button>
+      <div x-show="massMenu" x-cloak
+           @click.outside="massMenu = false"
+           class="absolute left-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded shadow-xl z-10 min-w-48">
+        <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-700" @click="massAction('accept'); massMenu=false">{{ t['lbl_mass_accept'] }}</button>
+        <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-700" @click="massAction('drop'); massMenu=false">{{ t['lbl_mass_drop'] }}</button>
+        <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-700" @click="massAction('skip'); massMenu=false">{{ t['lbl_mass_skip'] }}</button>
+        <button class="w-full text-left px-4 py-2 text-sm hover:bg-gray-700" @click="massAction('regenerate'); massMenu=false">{{ t['lbl_mass_regen'] }}</button>
+      </div>
+    </div>
+    <label class="flex items-center gap-1.5 text-xs text-gray-400">
+      <input type="checkbox" x-model="includeWithWarnings" class="rounded"> {{ t['lbl_include_warnings'] }}
+    </label>
+  </div>
+
+  <!-- Items table -->
+  <div class="border border-gray-800 rounded overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-900 border-b border-gray-800">
+        <tr>
+          <th class="w-8 px-3 py-2">
+            <input type="checkbox" class="rounded"
+                   @change="toggleAll($event.target.checked)"
+                   :checked="allSelected">
+          </th>
+          <th class="px-3 py-2 text-left text-xs text-gray-500 font-medium">#</th>
+          <th class="px-3 py-2 text-left text-xs text-gray-500 font-medium">{{ t['lbl_file'] }}</th>
+          <th class="px-3 py-2 text-left text-xs text-gray-500 font-medium">{{ t['lbl_state'] }}</th>
+          <th class="px-3 py-2 text-left text-xs text-gray-500 font-medium">{{ t['lbl_warnings'] }}</th>
+          <th class="px-3 py-2 text-left text-xs text-gray-500 font-medium">{{ t['lbl_decision'] }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        {% set warning_count = item.warnings | length if item.warnings else 0 %}
+        <tr class="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors"
+            data-item-id="{{ item.id }}"
+            x-show="matchesFilter('{{ item.state }}')"
+            :class="{'bg-gray-900/30': expandedId === {{ item.id }}}">
+          <td class="px-3 py-2">
+            <input type="checkbox" class="rounded"
+                   :checked="selectedIds.has({{ item.id }})"
+                   @change="toggleItem({{ item.id }}, $event.target.checked)">
+          </td>
+          <td class="px-3 py-2 text-gray-500">{{ loop.index }}</td>
+          <td class="px-3 py-2 cursor-pointer" @click="toggleExpand({{ item.id }})">
+            <span class="text-gray-200 font-mono text-xs">{{ item.file_name }}</span>
+            {% if item.last_error_category %}<span class="ml-1 text-red-400 text-xs">⚠</span>{% endif %}
+          </td>
+          <td class="px-3 py-2">
+            <span class="badge state-{{ item.state }}">{{ item.state }}</span>
+          </td>
+          <td class="px-3 py-2">
+            {% if warning_count > 0 %}
+            <span class="text-yellow-400 text-xs">{{ warning_count }} {{ t['lbl_warn_count'] }}</span>
+            {% else %}
+            <span class="text-gray-600 text-xs">—</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2">
+            {% if item.decision %}
+            <span class="text-xs text-gray-400">{{ item.decision }}</span>
+            {% else %}
+            <span class="text-gray-600 text-xs">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        <!-- Expanded inline row -->
+        <tr x-show="matchesFilter('{{ item.state }}') && expandedId === {{ item.id }}" x-cloak>
+          <td colspan="6" class="px-6 py-4 bg-gray-950 border-b border-gray-800">
+            {% if item.normalized_caption %}
+            <div class="mb-2">
+              <span class="text-xs text-gray-500 uppercase tracking-wide">Caption:</span>
+              <p class="text-sm text-gray-200 font-mono mt-1">{{ item.normalized_caption }}</p>
+            </div>
+            {% endif %}
+            {% if item.warnings %}
+            <div class="mb-2">
+              <span class="text-xs text-gray-500 uppercase tracking-wide">{{ t['lbl_warnings_detail'] }}:</span>
+              {% for w in item.warnings %}
+              <p class="text-xs text-yellow-400 mt-0.5">⚠ {{ w.get('code', '') }}: {{ w.get('message', '') }}</p>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if item.generation_prompt %}
+            <div class="mb-2">
+              <span class="text-xs text-gray-500 uppercase tracking-wide">{{ t['lbl_gen_prompt'] }}</span>
+              <p class="text-xs text-gray-400 font-mono mt-1 truncate">{{ item.generation_prompt[:200] }}{% if item.generation_prompt | length > 200 %}...{% endif %}</p>
+            </div>
+            {% endif %}
+            {% if item.last_error_message %}
+            <div class="mb-2">
+              <span class="text-xs text-red-400 uppercase tracking-wide">{{ t['lbl_error'] }}:</span>
+              {% if item.last_error_at %}
+              <span class="text-xs text-red-400/70 ml-1">({{ item.last_error_at.strftime('%Y-%m-%d %H:%M:%S UTC') }})</span>
+              {% endif %}
+              <p class="text-xs text-red-300 mt-0.5">{{ item.last_error_message[:300] }}</p>
+            </div>
+            {% endif %}
+            <a href="?tab=review&item_id={{ item.id }}" class="text-xs text-blue-400 hover:text-blue-300">{{ t['btn_open_in_review'] }}</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">{{ t['lbl_no_items'] }}</td></tr>
+        {% endfor %}
+        {% if items %}
+        <tr x-show="visibleCount === 0" x-cloak>
+          <td colspan="6" class="px-6 py-8 text-center text-gray-500">{{ t['lbl_no_items_filter'] }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>

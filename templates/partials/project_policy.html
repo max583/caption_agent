@@ -1,0 +1,203 @@
+{# Caption policy panel partial — loaded lazily via HTMX (D-114) #}
+{# Data injected via <script type="application/json"> to avoid double-quote collision
+   between tojson output and the double-quoted x-data HTML attribute. #}
+<script type="application/json" id="policy-init-data-{{ project.id }}">
+{{ {
+  'identity_trait_patterns': policy.identity_trait_patterns,
+  'setting_overspecific_phrases': policy.setting_overspecific_phrases,
+  'source_ref_required_setting': policy.source_ref_required_setting,
+  'coarse_setting_note': policy.coarse_setting_note,
+  'custom_normalizer_rules': policy.custom_normalizer_rules,
+  'custom_checker_rules': policy.custom_checker_rules,
+  'is_default': is_default
+} | tojson }}
+</script>
+
+<div x-data="{
+  saving: false,
+  resetting: false,
+  saved: false,
+  error: null,
+  isDefault: false,
+  identityPatterns: [],
+  settingPhrases: [],
+  sourceRefSetting: '',
+  coarseSettingNote: '',
+  customNormalizerRules: '',
+  customCheckerRules: '',
+
+  init() {
+    const el = document.getElementById('policy-init-data-{{ project.id }}');
+    if (el) {
+      const d = JSON.parse(el.textContent);
+      this.identityPatterns = d.identity_trait_patterns;
+      this.settingPhrases = d.setting_overspecific_phrases;
+      this.sourceRefSetting = d.source_ref_required_setting;
+      this.coarseSettingNote = d.coarse_setting_note;
+      this.customNormalizerRules = d.custom_normalizer_rules || '';
+      this.customCheckerRules = d.custom_checker_rules || '';
+      this.isDefault = d.is_default;
+    }
+  },
+
+  async savePolicy() {
+    this.saving = true; this.saved = false; this.error = null;
+    const body = {
+      identity_trait_patterns: this.identityPatterns.filter(s => s.trim()),
+      setting_overspecific_phrases: this.settingPhrases.filter(s => s.trim()),
+      source_ref_required_setting: this.sourceRefSetting,
+      coarse_setting_note: this.coarseSettingNote,
+      custom_normalizer_rules: this.customNormalizerRules || null,
+      custom_checker_rules: this.customCheckerRules || null,
+    };
+    try {
+      const r = await fetch('/api/projects/{{ project.id }}/policy', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { this.error = 'HTTP ' + r.status; } else { this.saved = true; this.isDefault = false; }
+    } catch(e) { this.error = String(e); }
+    this.saving = false;
+  },
+
+  async resetPolicy() {
+    if (!confirm('{{ t.btn_reset_policy }}?')) return;
+    this.resetting = true; this.error = null;
+    try {
+      const r = await fetch('/api/projects/{{ project.id }}/policy', { method: 'DELETE' });
+      if (!r.ok) { this.error = 'HTTP ' + r.status; }
+      else {
+        const data = await r.json();
+        this.identityPatterns = data.identity_trait_patterns;
+        this.settingPhrases = data.setting_overspecific_phrases;
+        this.sourceRefSetting = data.source_ref_required_setting;
+        this.coarseSettingNote = data.coarse_setting_note;
+        this.customNormalizerRules = data.custom_normalizer_rules || '';
+        this.customCheckerRules = data.custom_checker_rules || '';
+        this.isDefault = true; this.saved = false;
+      }
+    } catch(e) { this.error = String(e); }
+    this.resetting = false;
+  }
+}">
+
+  <div x-show="isDefault" class="text-xs text-blue-400 mb-3 px-1">ℹ {{ t['lbl_policy_using_defaults'] }}</div>
+
+  {# Macro-like helper: renders the 4-part help block for a policy field #}
+  {# Used inline below for each of the 6 fields #}
+
+  <!-- Identity trait patterns -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_identity_trait_patterns'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_identity_patterns_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_identity_patterns_how'] }}</p>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_identity_patterns_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_identity_patterns_tech'] }}</p>
+    </div>
+    <textarea class="input w-full font-mono text-xs" rows="6"
+              x-model.lazy="identityPatterns.join('\n')"
+              @change="identityPatterns = $event.target.value.split('\n')"></textarea>
+  </div>
+
+  <!-- Setting overspecific phrases -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_setting_overspecific_phrases'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_setting_phrases_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_setting_phrases_how'] }}</p>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_setting_phrases_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_setting_phrases_tech'] }}</p>
+    </div>
+    <textarea class="input w-full font-mono text-xs" rows="6"
+              x-model.lazy="settingPhrases.join('\n')"
+              @change="settingPhrases = $event.target.value.split('\n')"></textarea>
+  </div>
+
+  <!-- Source ref setting token -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_source_ref_setting'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_source_ref_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_source_ref_how'] }}</p>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_source_ref_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_source_ref_tech'] }}</p>
+    </div>
+    <input class="input w-full font-mono text-sm" x-model="sourceRefSetting">
+  </div>
+
+  <!-- Coarse setting note -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_coarse_setting_note'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_coarse_setting_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_coarse_setting_how'] }}</p>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_coarse_setting_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_coarse_setting_tech'] }}</p>
+    </div>
+    <textarea class="input w-full text-xs" rows="4" x-model="coarseSettingNote"></textarea>
+  </div>
+
+  <!-- Custom normalizer rules -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_custom_normalizer_rules'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_normalizer_rules_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_normalizer_rules_how'] }}</p>
+      <pre class="text-xs text-gray-500 bg-gray-800 rounded px-2 py-1 mt-1 whitespace-pre-wrap">Always mention footwear if visible, including color and type.
+If a hat or headwear is present, specify its type and color.
+Never use vague terms like "casual" or "simple" to describe clothing.</pre>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_normalizer_rules_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_normalizer_rules_tech'] }}</p>
+    </div>
+    <textarea class="input w-full text-xs" rows="3" x-model="customNormalizerRules"
+              placeholder="Оставьте пустым для дефолтного поведения"></textarea>
+  </div>
+
+  <!-- Custom checker rules -->
+  <div class="mb-5">
+    <label class="label text-sm">{{ t['lbl_custom_checker_rules'] }}</label>
+    <div class="space-y-1 mb-2">
+      <p class="text-xs text-gray-300">{{ t['help_checker_rules_what'] }}</p>
+      <p class="text-xs text-gray-400">{{ t['help_checker_rules_how'] }}</p>
+      <pre class="text-xs text-gray-500 bg-gray-800 rounded px-2 py-1 mt-1 whitespace-pre-wrap">Flag any caption that mentions a real geographic location (e.g. city or country name).
+Warn if the character's age is stated explicitly as a number.
+Flag if the caption contains more than two clothing items described in detail.</pre>
+      <details class="text-xs">
+        <summary class="text-gray-500 cursor-pointer select-none">{{ t['lbl_for_experts'] }}</summary>
+        <p class="text-gray-500 mt-1 pl-2 border-l border-gray-700">{{ t['help_checker_rules_expert'] }}</p>
+      </details>
+      <p class="text-xs text-gray-600 italic">{{ t['help_checker_rules_tech'] }}</p>
+    </div>
+    <textarea class="input w-full text-xs" rows="3" x-model="customCheckerRules"
+              placeholder="Оставьте пустым для дефолтного поведения"></textarea>
+  </div>
+
+  <!-- Actions -->
+  <div class="flex items-center gap-3 mt-2">
+    <button class="btn-primary text-sm" @click="savePolicy()" :disabled="saving">
+      <span x-text="saving ? '…' : '{{ t.btn_save_policy }}'"></span>
+    </button>
+    <button class="btn-secondary text-sm" @click="resetPolicy()" :disabled="resetting">
+      <span x-text="resetting ? '…' : '{{ t.btn_reset_policy }}'"></span>
+    </button>
+    <span x-show="saved" x-cloak class="text-green-400 text-xs">✓ Сохранено</span>
+    <span x-show="error" x-cloak class="text-red-400 text-xs" x-text="error"></span>
+  </div>
+</div>

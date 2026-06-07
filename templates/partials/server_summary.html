@@ -1,0 +1,21 @@
+<div id="server-summary"
+     class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6 flex flex-wrap gap-x-6 gap-y-2 text-sm"
+     hx-get="/partials/summary"
+     hx-trigger="every {{ poll_interval | default(30) }}s"
+     hx-target="#server-summary"
+     hx-swap="outerHTML">
+  <span class="text-gray-400">{{ t['lbl_total_projects'] }} <strong class="text-white">{{ summary.total_projects }}</strong></span>
+  <span class="text-gray-400">{{ t['lbl_active_batches_sum'] }} <strong class="text-white">{{ summary.active_batches }}</strong></span>
+  {% if summary.awaiting_review_items > 0 %}
+  <span class="text-yellow-400">{{ t['lbl_awaiting_review_sum'] }} <strong>{{ summary.awaiting_review_items }}</strong></span>
+  {% else %}
+  <span class="text-gray-400">{{ t['lbl_awaiting_review_sum'] }} <strong class="text-white">0</strong></span>
+  {% endif %}
+  {% if summary.scheduled_batches > 0 %}
+  <span class="text-purple-400">{{ t['lbl_scheduled_sum'] }} <strong>{{ summary.scheduled_batches }}</strong></span>
+  {% endif %}
+  {% if summary.error_batches > 0 %}
+  <span class="text-red-400">{{ t['lbl_errors_sum'] }} <strong>{{ summary.error_batches }}</strong></span>
+  {% endif %}
+  <span class="text-gray-600 ml-auto text-xs self-center">{{ t['lbl_queue_depth'] }} {{ summary.queue_depth }}</span>
+</div>

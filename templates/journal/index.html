@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}{{ t['page_journal'] }} — Caption Agent{% endblock %}
+{% block nav_journal %}active{% endblock %}
+
+{% block content %}
+<h1 class="section-title">{{ t['page_journal'] }}</h1>
+
+<!-- Filters -->
+<div class="card p-4 mb-4" x-data="journalFilters()">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+    <div>
+      <label class="label">{{ t['lbl_level_filter'] }}</label>
+      <select name="level" class="input w-full" x-model="filters.level">
+        <option value="">{{ t['lbl_all'] }}</option>
+        {% for lv in log_levels %}
+        <option value="{{ lv }}" {% if filter_level == lv %}selected{% endif %}>{{ lv }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">{{ t['lbl_project_filter'] }}</label>
+      <select name="project_id" class="input w-full" x-model="filters.project_id">
+        <option value="">{{ t['lbl_all'] }}</option>
+        {% for p in all_projects %}
+        <option value="{{ p.id }}" {% if filter_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">{{ t['lbl_date_from'] }}</label>
+      <input type="datetime-local" class="input w-full" x-model="filters.date_from">
+    </div>
+    <div>
+      <label class="label">{{ t['lbl_date_to'] }}</label>
+      <input type="datetime-local" class="input w-full" x-model="filters.date_to">
+    </div>
+  </div>
+  <div class="flex gap-3 items-end">
+    <div class="flex-1">
+      <label class="label">{{ t['lbl_search_label'] }}</label>
+      <input type="text" class="input w-full" :placeholder="window._t?.lbl_search_placeholder || 'Text...'" x-model="filters.search">
+    </div>
+    <button class="btn-primary" @click="applyFilters()">{{ t['btn_apply_filters'] }}</button>
+    <button class="btn-secondary" @click="resetFilters()">{{ t['btn_reset_filters'] }}</button>
+  </div>
+</div>
+
+<!-- Delete filtered button -->
+{% if total > 0 %}
+<div class="flex justify-end mb-3">
+  <button class="btn-danger text-xs" onclick="deleteFilteredLogs()">
+    {{ t['btn_delete_filtered'] }} ({{ total }})
+  </button>
+</div>
+{% endif %}
+
+<!-- Log table -->
+<div class="card overflow-hidden">
+  <table class="w-full text-xs">
+    <thead class="bg-gray-900 border-b border-gray-800">
+      <tr>
+        <th class="px-3 py-2.5 text-left text-gray-500 font-medium w-32">{{ t['lbl_journal_time'] }}</th>
+        <th class="px-3 py-2.5 text-left text-gray-500 font-medium w-16">{{ t['lbl_journal_level'] }}</th>
+        <th class="px-3 py-2.5 text-left text-gray-500 font-medium w-32">{{ t['lbl_journal_event'] }}</th>
+        <th class="px-3 py-2.5 text-left text-gray-500 font-medium">{{ t['lbl_journal_message'] }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      {% set level_class = {
+        'error': 'text-red-400',
+        'warning': 'text-yellow-400',
+        'info': 'text-blue-400',
+        'debug': 'text-gray-500',
+      } %}
+      <tr class="border-b border-gray-800/50 hover:bg-gray-900/50"
+          x-data="{ expanded: false }" @click="expanded = !expanded">
+        <td class="px-3 py-2 font-mono text-gray-500 whitespace-nowrap">
+          <span x-text="expanded ? '▾' : '▸'" class="mr-1 text-gray-600"></span>
+          {{ log.timestamp.strftime('%m-%d %H:%M:%S') }}
+        </td>
+        <td class="px-3 py-2 font-medium {{ level_class.get(log.level, 'text-gray-400') }}">
+          {{ log.level | upper }}
+        </td>
+        <td class="px-3 py-2 font-mono text-gray-400 whitespace-nowrap">{{ log.event_type }}</td>
+        <td class="px-3 py-2 text-gray-300">
+          {{ log.message | truncate(120) }}
+          {% if log.batch_id %}
+          <a href="/projects/0/batches/{{ log.batch_id }}" class="ml-2 text-blue-400/70 hover:text-blue-400" @click.stop>
+            #batch{{ log.batch_id }}
+          </a>
+          {% endif %}
+        </td>
+      </tr>
+      <tr x-show="expanded" x-cloak class="bg-gray-950">
+        <td colspan="4" class="px-6 py-3 text-xs">
+          <div class="text-gray-400 mb-1">{{ log.message }}</div>
+          {% if log.project_id %}<div class="text-gray-500">Project: {{ log.project_id }}</div>{% endif %}
+          {% if log.batch_id %}<div class="text-gray-500">Batch: {{ log.batch_id }}</div>{% endif %}
+          {% if log.image_item_id %}<div class="text-gray-500">Item: {{ log.image_item_id }}</div>{% endif %}
+          {% if log.details %}
+          <pre class="mt-2 text-gray-500 font-mono text-xs overflow-x-auto max-h-24">{{ log.details | tojson(indent=2) }}</pre>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="px-6 py-8 text-center text-gray-500">{{ t['lbl_journal_empty'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+{% if pages > 1 %}
+<div class="flex justify-center items-center gap-3 mt-4 text-sm">
+  {% if page > 1 %}
+  <a href="?page={{ page - 1 }}&{{ request.query_string.decode() | replace('page=' ~ page, '') }}"
+     class="btn-secondary">{{ t['lbl_journal_prev'] }}</a>
+  {% endif %}
+  <span class="text-gray-400">{{ t['lbl_journal_page'] }} {{ page }} {{ t['lbl_journal_of'] }} {{ pages }}</span>
+  {% if page < pages %}
+  <a href="?page={{ page + 1 }}&{{ request.query_string.decode() | replace('page=' ~ page, '') }}"
+     class="btn-secondary">{{ t['lbl_journal_next'] }}</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function journalFilters() {
+  const params = new URLSearchParams(location.search);
+  return {
+    filters: {
+      level: params.get('level') || '',
+      project_id: params.get('project_id') || '',
+      date_from: params.get('date_from') || '',
+      date_to: params.get('date_to') || '',
+      search: params.get('search') || '',
+    },
+    applyFilters() {
+      const p = new URLSearchParams();
+      if (this.filters.level) p.set('level', this.filters.level);
+      if (this.filters.project_id) p.set('project_id', this.filters.project_id);
+      if (this.filters.date_from) p.set('date_from', this.filters.date_from);
+      if (this.filters.date_to) p.set('date_to', this.filters.date_to);
+      if (this.filters.search) p.set('search', this.filters.search);
+      window.location.href = '/journal?' + p.toString();
+    },
+    resetFilters() { window.location.href = '/journal'; }
+  }
+}
+
+async function deleteFilteredLogs() {
+  const p = new URLSearchParams(location.search);
+  const count = {{ total }};
+  const confirmMsg = (window._t?.confirm_delete_logs || 'Delete {n} records?').replace('{n}', count);
+  if (!confirm(confirmMsg)) return;
+  const resp = await fetch('/api/logs?' + p.toString(), { method: 'DELETE' });
+  if (resp.ok) {
+    const d = await resp.json();
+    showToast((window._t?.lbl_deleted_count || 'Deleted: ') + d.deleted, 'info');
+    location.reload();
+  } else {
+    showToast(window._t?.lbl_delete_error || 'Delete error', 'error');
+  }
+}
+</script>
+{% endblock %}

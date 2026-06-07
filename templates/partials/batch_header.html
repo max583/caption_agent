@@ -1,0 +1,104 @@
+{% set dot_class = {
+  'error': 'bg-red-500',
+  'review': 'bg-yellow-400',
+  'active': 'bg-green-500',
+  'scanning': 'bg-blue-400',
+  'scheduled': 'bg-purple-500',
+  'idle': 'bg-gray-500'
+} %}
+<div id="batch-header"
+     hx-get="/partials/batches/{{ batch.id }}/header"
+     hx-trigger="every {{ poll_interval | default(30) }}s, refreshBatchHeader"
+     hx-target="#batch-header"
+     hx-swap="outerHTML">
+  <div class="flex items-start justify-between gap-4">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="badge state-{{ batch.state }}">{{ batch.state }}</span>
+        {% if batch_out.error_items > 0 %}
+        <span class="badge bg-red-500/20 text-red-400 border border-red-500/30">{{ batch_out.error_items }} {{ t['lbl_errors_count'] }}</span>
+        {% endif %}
+      </div>
+      <div class="text-xs text-gray-400">
+        {{ batch.source_folder_path }}
+        · {{ batch.source_type }} / {{ batch.branch }}
+        {% if batch.schedule_at %}· {{ t['lbl_schedule_label'] }} {{ batch.schedule_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+      </div>
+      {% if batch.state == 'scanning' and batch_out.total_items > 0 %}
+      <div class="mt-3">
+        <div class="flex items-center gap-2">
+          <div class="bg-gray-800 rounded-full h-2 flex-1">
+            {% set scan_pct = (batch_out.scan_progress / batch_out.total_items * 100) | int if batch_out.total_items > 0 else 0 %}
+            <div class="bg-blue-400 h-2 rounded-full transition-all"
+                 style="width: {{ scan_pct }}%"></div>
+          </div>
+          <span class="text-xs text-blue-400 whitespace-nowrap">
+            {{ t['lbl_scanning_progress'] }} {{ batch_out.scan_progress }}/{{ batch_out.total_items }} ({{ scan_pct }}%)
+          </span>
+        </div>
+      </div>
+      {% elif batch_out.total_items > 0 %}
+      <div class="mt-3">
+        <div class="flex items-center gap-2">
+          <div class="bg-gray-800 rounded-full h-2 flex-1">
+            <div class="bg-blue-500 h-2 rounded-full transition-all"
+                 style="width: {{ batch_out.progress_pct }}%"></div>
+          </div>
+          <span class="text-xs text-gray-400 whitespace-nowrap">
+            {{ batch_out.progress_pct }}% ({{ batch_out.approved_items }} / {{ batch_out.total_items }})
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-500">
+          {% if batch_out.awaiting_review_items %}<span class="text-yellow-400">{{ batch_out.awaiting_review_items }} {{ t['lbl_review_short'] }}</span>{% endif %}
+          {% if batch_out.processing_items %}<span class="text-green-400">{{ batch_out.processing_items }} {{ t['lbl_processing_count'] }}</span>{% endif %}
+          {% if batch_out.error_items %}<span class="text-red-400">{{ batch_out.error_items }} {{ t['lbl_errors_count'] }}</span>{% endif %}
+          {% if batch_out.done_items %}<span>{{ batch_out.done_items }} done</span>{% endif %}
+          {% if batch_out.skipped_items %}<span>{{ batch_out.skipped_items }} skip</span>{% endif %}
+          {% if batch_out.dropped_items %}<span>{{ batch_out.dropped_items }} drop</span>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex items-center gap-2 flex-shrink-0">
+      {% if batch.state == 'queued' %}
+      <span class="text-xs text-blue-400">{{ t['lbl_queued_state'] }}</span>
+      {% elif batch.state == 'scanning' %}
+      <span class="text-xs text-blue-400">{{ t['lbl_scanning_state'] }}</span>
+      <button class="btn-danger text-xs" onclick="batchLifecycle({{ batch.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+      {% elif batch.state == 'processing' %}
+      {% if batch_out.processing_started_at %}
+      <div class="text-xs text-gray-500 font-mono"
+           x-data="processingTimer('{{ batch_out.processing_started_at.isoformat() }}', {{ batch_out.total_items }}, {{ batch_out.awaiting_review_items + batch_out.approved_items + batch_out.error_items + batch_out.skipped_items + batch_out.dropped_items }})"
+           x-init="start()"
+           x-text="display"></div>
+      {% endif %}
+      <button class="btn-secondary text-xs" onclick="batchLifecycle({{ batch.id }}, 'pause')">{{ t['btn_pause'] }}</button>
+      <button class="btn-danger text-xs" onclick="batchLifecycle({{ batch.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+      {% elif batch.state == 'paused' %}
+      <button class="btn-primary text-xs" onclick="batchLifecycle({{ batch.id }}, 'resume')">{{ t['btn_resume'] }}</button>
+      <button class="btn-danger text-xs" onclick="batchLifecycle({{ batch.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+      {% elif batch.state == 'error' %}
+      <button class="btn-primary text-xs" onclick="batchLifecycle({{ batch.id }}, 'resume')">{{ t['btn_resume'] }}</button>
+      {% elif batch.state == 'awaiting_review' %}
+      {% set queued_count = batch_out.total_items - batch_out.awaiting_review_items - batch_out.approved_items - batch_out.error_items %}
+      {% if queued_count > 0 %}
+      <button class="btn-primary text-xs" onclick="batchLifecycle({{ batch.id }}, 'resume')">{{ t['btn_reprocess'] }} ({{ queued_count }})</button>
+      {% endif %}
+      <button class="btn-primary text-xs" onclick="batchLifecycle({{ batch.id }}, 'export')">{{ t['btn_export'] }}</button>
+      {% elif batch.state in ['scheduled', 'done'] %}
+      {# nothing — or add manual queue trigger #}
+      {% endif %}
+      {% if batch_out.error_items > 0 and batch.state != 'processing' %}
+      <button class="btn-secondary text-xs text-red-300 border border-red-500/30"
+              onclick="regenerateErrors({{ batch.id }}, {{ batch_out.error_items }})">
+        {{ t['btn_retry_errors'] }} ({{ batch_out.error_items }})
+      </button>
+      {% endif %}
+      {% if batch.state not in ['processing'] %}
+      <button class="btn-ghost text-xs" onclick="scanBatch({{ batch.id }})">{{ t['btn_scan'] }}</button>
+      {% endif %}
+    </div>
+  </div>
+</div>

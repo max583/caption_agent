@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block nav_help %}active{% endblock %}
+{% block title %}{{ t.get('nav_help', 'Help') }} — Caption Agent{% endblock %}
+
+{% block head %}
+<style>
+  /* Help prose typography */
+  .help-prose h1 { font-size:1.125rem; font-weight:600; color:#fff; margin-bottom:1rem; }
+  .help-prose h2 { font-size:.9375rem; font-weight:600; color:#e5e7eb; margin:1.5rem 0 .5rem; }
+  .help-prose h3 { font-size:.875rem; font-weight:600; color:#d1d5db; margin:1rem 0 .375rem; }
+  .help-prose p  { color:#d1d5db; margin-bottom:.75rem; line-height:1.65; }
+  .help-prose ul, .help-prose ol { color:#d1d5db; padding-left:1.5rem; margin-bottom:.75rem; }
+  .help-prose li { margin-bottom:.25rem; line-height:1.6; }
+  .help-prose strong { color:#f3f4f6; }
+  .help-prose code { background:#1f2937; color:#93c5fd; padding:.125rem .375rem; border-radius:.25rem; font-size:.8125rem; font-family:ui-monospace,monospace; }
+  .help-prose pre  { background:#1f2937; border:1px solid #374151; border-radius:.375rem; padding:1rem; overflow-x:auto; margin-bottom:.75rem; }
+  .help-prose pre code { background:transparent; color:#d1d5db; padding:0; }
+  .help-prose table { width:100%; border-collapse:collapse; margin-bottom:.75rem; font-size:.875rem; }
+  .help-prose th { background:#1f2937; color:#9ca3af; padding:.5rem .75rem; text-align:left; border-bottom:1px solid #374151; font-weight:500; }
+  .help-prose td { padding:.5rem .75rem; border-bottom:1px solid #111827; color:#d1d5db; vertical-align:top; }
+  .help-prose blockquote { border-left:3px solid #374151; padding:.5rem 1rem; color:#9ca3af; margin:.75rem 0; }
+  .help-prose blockquote strong { color:#fbbf24; }
+  .help-prose a { color:#60a5fa; }
+  .help-prose a:hover { color:#93c5fd; text-decoration:underline; }
+  .help-prose .mermaid { margin:1rem 0; }
+  /* Nav sidebar */
+  .help-nav-section { font-size:.75rem; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; padding:.5rem .75rem .25rem; margin-top:.5rem; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between; }
+  .help-nav-section:hover { color:#9ca3af; }
+  .help-nav-link { display:block; font-size:.8125rem; color:#9ca3af; padding:.3rem .75rem .3rem 1.25rem; border-radius:.25rem; text-decoration:none; transition:color 150ms, background 150ms; }
+  .help-nav-link:hover { color:#fff; background:#1f2937; }
+  .help-nav-link.active { color:#fff; background:#1f2937; border-left:2px solid #3b82f6; padding-left:calc(1.25rem - 2px); }
+</style>
+<!-- Mermaid.js — only for help pages -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true });
+  document.addEventListener('DOMContentLoaded', () => mermaid.run());
+  document.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail.target && e.detail.target.id === 'help-content') {
+      mermaid.run({ nodes: document.querySelectorAll('#help-content .mermaid') });
+    }
+  });
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="-mx-6 -my-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">
+
+  <!-- Sidebar navigation -->
+  <aside class="w-56 flex-shrink-0 bg-gray-900 border-r border-gray-800 overflow-y-auto"
+         x-data="helpNav('{{ active_section_id }}', '{{ active_slug }}')"
+         x-cloak>
+    <div class="py-2">
+      {% for section in nav_tree %}
+      <div>
+        <!-- Section header -->
+        <div class="help-nav-section" @click="toggle('{{ section.id }}')">
+          <span>{% if ui_lang == 'ru' %}{{ section.title_ru }}{% else %}{{ section.title_en }}{% endif %}</span>
+          <span class="text-gray-600 text-xs" x-text="open['{{ section.id }}'] ? '▾' : '▸'"></span>
+        </div>
+        <!-- Pages list -->
+        <div x-show="open['{{ section.id }}']">
+          {% for page in section.pages %}
+          <a href="/help/{{ page.slug }}"
+             class="help-nav-link {% if page.slug == active_slug %}active{% endif %}"
+             :class="{ 'active': currentSlug === '{{ page.slug }}' }"
+             hx-get="/help/content/{{ page.slug }}"
+             hx-target="#help-content"
+             hx-swap="innerHTML"
+             hx-push-url="/help/{{ page.slug }}"
+             @click.prevent="navigate('{{ page.slug }}')"
+             >{% if ui_lang == 'ru' %}{{ page.title_ru }}{% else %}{{ page.title_en }}{% endif %}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <!-- Content area -->
+  <main class="flex-1 overflow-y-auto px-8 py-6">
+    <div id="help-content"
+         hx-get="/help/content/{{ active_slug }}"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      <!-- Content loaded via HTMX on page load -->
+      <div class="text-gray-500 text-sm">{{ t.get('nav_help', 'Help') }}…</div>
+    </div>
+  </main>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function helpNav(activeSectionId, activeSlug) {
+  return {
+    open: {},
+    currentSlug: activeSlug,
+    init() {
+      // Open active section; close all others.
+      {{ nav_tree | tojson }}.forEach(s => {
+        this.open[s.id] = (s.id === activeSectionId);
+      });
+    },
+    toggle(id) { this.open[id] = !this.open[id]; },
+    navigate(slug) {
+      this.currentSlug = slug;
+      // Open the section that owns this slug.
+      const tree = {{ nav_tree | tojson }};
+      for (const section of tree) {
+        if (section.pages.some(p => p.slug === slug)) {
+          this.open[section.id] = true;
+          break;
+        }
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

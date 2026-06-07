@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} — Caption Agent{% endblock %}
+{% block nav_projects %}active{% endblock %}
+
+{% block content %}
+
+<!-- Breadcrumb -->
+<div class="text-sm text-gray-500 mb-4">
+  <a href="/" class="hover:text-gray-300">{{ t['lbl_back_to_list'] }}</a>
+</div>
+
+<!-- Project metadata card -->
+<div class="card p-5 mb-6" x-data='projectEditor({{ project.id }}, {{ project.name | tojson }}, {{ project.description | tojson }}, {{ project.trigger_token | tojson }}, {{ project.lora_type | tojson }}, {{ project.base_model_family | tojson }})'>
+  <div class="flex items-start justify-between">
+    <div x-show="!editing" class="flex-1">
+      <h1 class="text-xl font-bold text-white">{{ project.name }}</h1>
+      {% if project.description %}
+      <p class="text-gray-400 text-sm mt-1">{{ project.description }}</p>
+      {% else %}
+      <p class="text-gray-600 text-sm mt-1 italic">{{ t['lbl_no_description'] }}</p>
+      {% endif %}
+      <div class="text-xs text-gray-500 mt-2 flex gap-4 flex-wrap">
+        <span>{{ t['lbl_type_label'] }} {{ project.default_source_type }} / {{ project.default_branch }}</span>
+        <span>{{ t['lbl_output_label'] }} {{ project.default_output_policy }}</span>
+        <span>{{ t['lbl_created_label'] }} {{ project.created_at.strftime('%Y-%m-%d') }}</span>
+        <span>Trigger: <code class="text-blue-400 font-mono">{{ project.trigger_token }}</code></span>
+        <span>{{ t['lbl_lora_type'] }}: <code class="text-purple-400 font-mono">{{ project.lora_type }}</code></span>
+        <span>{{ t['lbl_base_model_family'] }}: <code class="text-gray-400 font-mono">{{ project.base_model_family }}</code></span>
+      </div>
+    </div>
+
+    <!-- Edit form -->
+    <form x-show="editing" x-cloak class="flex-1 space-y-3" @submit.prevent="save">
+      <div>
+        <label class="label">{{ t['lbl_name_label'] }}</label>
+        <input x-model="form.name" class="input w-full">
+      </div>
+      <div>
+        <label class="label">{{ t['lbl_description_label'] }}</label>
+        <input x-model="form.description" class="input w-full">
+      </div>
+      <div>
+        <label class="label">Trigger token (LoRA activation word)</label>
+        <input x-model="form.trigger_token" class="input w-full font-mono"
+               placeholder="p3rs0n4" spellcheck="false">
+        <p class="text-xs text-gray-500 mt-1">{{ t['lbl_trigger_token_hint'] }}</p>
+      </div>
+      <div>
+        <label class="label">{{ t['lbl_lora_type'] }}</label>
+        <select x-model="form.lora_type" class="input w-full">
+          <option value="character">{{ t['lora_type_character'] }}</option>
+          <option value="creature">{{ t['lora_type_creature'] }}</option>
+          <option value="style">{{ t['lora_type_style'] }}</option>
+          <option value="clothing">{{ t['lora_type_clothing'] }}</option>
+          <option value="pose">{{ t['lora_type_pose'] }}</option>
+          <option value="object">{{ t['lora_type_object'] }}</option>
+          <option value="face">{{ t['lora_type_face'] }}</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">{{ t['lbl_base_model_family'] }}</label>
+        <input x-model="form.base_model_family" class="input w-full font-mono"
+               :placeholder="t['lbl_base_model_hint']" spellcheck="false">
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn-primary">{{ t['btn_save'] }}</button>
+        <button type="button" class="btn-secondary" @click="cancel">{{ t['btn_cancel'] }}</button>
+      </div>
+    </form>
+
+    <div class="flex gap-2 ml-4">
+      <button x-show="!editing" class="btn-secondary text-xs" @click="editing = true">{{ t['btn_edit'] }}</button>
+      <button class="btn-danger text-xs"
+              @click='deleteProject({{ project.id }}, {{ project.name | tojson }})'>
+        {{ t['btn_delete'] }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Analysis panel (D-108) — lazy-loaded on first expand -->
+<div class="card p-5 mb-6" x-data="{ open: false, loaded: false }">
+  <div class="flex items-center justify-between cursor-pointer select-none"
+       @click="open = !open; if (open && !loaded) { loaded = true; htmx.trigger($refs.content, 'loadAnalysis') }">
+    <h2 class="text-base font-semibold text-white">📊 {{ t['lbl_analysis_title'] }}</h2>
+    <span class="text-gray-400 text-xs" x-text="open ? '▲' : '▼'"></span>
+  </div>
+  <div x-show="open" x-cloak x-ref="content"
+       id="analysis-content-{{ project.id }}"
+       class="mt-4"
+       hx-get="/partials/projects/{{ project.id }}/analysis"
+       hx-trigger="loadAnalysis"
+       hx-target="this"
+       hx-swap="innerHTML">
+    <div class="text-gray-500 text-sm py-2">{{ t['lbl_loading'] }}</div>
+  </div>
+</div>
+
+<!-- Caption Policy panel (D-114) — lazy-loaded on first expand -->
+<div class="card p-5 mb-6" x-data="{ open: false, loaded: false }">
+  <div class="flex items-center justify-between cursor-pointer select-none"
+       @click="open = !open; if (open && !loaded) { loaded = true; htmx.trigger($refs.policyContent, 'loadPolicy') }">
+    <h2 class="text-base font-semibold text-white">⚙️ {{ t['lbl_caption_policy'] }}</h2>
+    <span class="text-gray-400 text-xs" x-text="open ? '▲' : '▼'"></span>
+  </div>
+  <div x-show="open" x-cloak x-ref="policyContent"
+       id="policy-content-{{ project.id }}"
+       class="mt-4"
+       hx-get="/partials/projects/{{ project.id }}/policy"
+       hx-trigger="loadPolicy"
+       hx-target="this"
+       hx-swap="innerHTML">
+    <div class="text-gray-500 text-sm py-2">{{ t['lbl_loading'] }}</div>
+  </div>
+</div>
+
+<!-- Batch list -->
+<div class="flex items-center justify-between mb-4">
+  <h2 class="text-base font-semibold text-white">{{ t['lbl_batches_section'] }}</h2>
+  <div class="flex gap-2">
+    <a href="/journal?project_id={{ project.id }}" class="btn-ghost text-xs">{{ t['btn_project_logs'] }}</a>
+    <button class="btn-primary text-xs"
+            x-data @click="$dispatch('open-create-batch')">
+      {{ t['btn_create_batch'] }}
+    </button>
+  </div>
+</div>
+
+<div id="batch-list"
+     class="flex flex-col gap-3"
+     hx-get="/partials/projects/{{ project.id }}/batches"
+     hx-trigger="every {{ poll_interval }}s, refreshBatchList"
+     hx-target="#batch-list"
+     hx-swap="innerHTML"
+     x-data="batchActions({{ project.id }})">
+  {% include "partials/batch_cards.html" %}
+</div>
+
+<!-- Create batch modal -->
+<div x-data="createBatchModal({{ project.id }})"
+     @open-create-batch.window="open = true">
+  <template x-if="open">
+    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+         @keydown.escape.window="open = false">
+      <div class="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-lg p-6"
+           @click.stop>
+        <h2 class="text-lg font-semibold mb-4">{{ t['lbl_create_batch_title'] }}</h2>
+        <form @submit.prevent="submit">
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_name_field'] }}</label>
+            <input x-model="form.name" class="input w-full" placeholder="iter1_portraits" required autofocus>
+          </div>
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_images_folder'] }}</label>
+            <div class="flex gap-2">
+              <input x-model="form.source_folder_path" @blur="checkFolder()" @change="checkFolder()"
+                     class="input flex-1" placeholder="D:/refs/v002/portrait/" required>
+              <button type="button" class="btn-secondary text-sm whitespace-nowrap" @click="openBrowse()">{{ t['lbl_browse'] }}</button>
+            </div>
+            <p class="text-xs mt-1 h-4">
+              <span x-show="folderImageCount !== null && !folderCheckError" class="text-green-400" x-cloak
+                    x-text="folderImageCount > 0 ? `Найдено изображений: ${folderImageCount}` : 'В папке нет изображений'"></span>
+              <span x-show="folderCheckError" class="text-red-400" x-cloak x-text="folderCheckError"></span>
+            </p>
+          </div>
+
+          <!-- Folder browser overlay (nested inside the create-batch modal) -->
+          <div x-show="browse.open" x-cloak
+               class="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4"
+               @keydown.escape.window="browse.open = false">
+            <div class="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl flex flex-col"
+                 style="height: min(80vh, 600px)" @click.stop>
+              <div class="p-4 border-b border-gray-800 flex items-center gap-3">
+                <h3 class="text-sm font-semibold flex-shrink-0">{{ t['lbl_folder_picker_title'] }}</h3>
+                <input x-model="browse.path" @keydown.enter="loadDir(browse.path)"
+                       class="input flex-1 text-xs font-mono" :placeholder="window._t?.lbl_folder_picker_title || 'Enter path'">
+                <button type="button" class="btn-ghost text-xs" @click="loadDir(browse.path)">{{ t['btn_go'] }}</button>
+              </div>
+              <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-2 text-xs flex-wrap">
+                <button type="button" class="btn-ghost text-xs" :disabled="!browse.parent"
+                        @click="loadDir(browse.parent)">{{ t['btn_up'] }}</button>
+                <template x-for="d in browse.drives" :key="d">
+                  <button type="button" class="btn-ghost text-xs" @click="loadDir(d)"
+                          x-text="d"></button>
+                </template>
+                <span class="ml-auto text-gray-500"
+                      x-text="browse.imageCount > 0 ? `${browse.imageCount} изображений в этой папке` : ''"></span>
+              </div>
+              <div class="flex-1 overflow-y-auto p-2">
+                <p x-show="browse.loading" class="text-gray-500 text-sm p-3" x-cloak>{{ t['lbl_loading'] }}</p>
+                <p x-show="browse.error" x-text="browse.error" class="text-red-400 text-sm p-3" x-cloak></p>
+                <template x-for="d in browse.dirs" :key="d.path">
+                  <button type="button"
+                          class="w-full text-left px-3 py-1.5 rounded text-sm text-gray-200 hover:bg-gray-800 font-mono"
+                          @dblclick="loadDir(d.path)" @click="browse.path = d.path">
+                    📁 <span x-text="d.name"></span>
+                  </button>
+                </template>
+                <p x-show="!browse.loading && !browse.error && browse.dirs.length === 0"
+                   class="text-gray-500 text-xs p-3" x-cloak>{{ t['lbl_no_subdirs'] }}</p>
+              </div>
+              <div class="p-3 border-t border-gray-800 flex justify-between items-center gap-3">
+                <span class="text-xs text-gray-500">{{ t['lbl_dblclick_hint'] }}</span>
+                <div class="flex gap-2">
+                  <button type="button" class="btn-secondary text-xs" @click="browse.open = false">{{ t['btn_cancel'] }}</button>
+                  <button type="button" class="btn-primary text-xs" @click="pickDir()" :disabled="!browse.path">{{ t['btn_select_folder'] }}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label class="label">{{ t['lbl_source_type'] }}</label>
+              <select x-model="form.source_type" class="input w-full">
+                <option value="synthetic">synthetic</option>
+                <option value="reference">reference</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">{{ t['lbl_branch_label'] }}</label>
+              <select x-model="form.branch" class="input w-full">
+                <option value="identity">identity</option>
+                <option value="nude_body_neutral">nude_body_neutral</option>
+                <option value="adult_aroused">adult_aroused</option>
+              </select>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="label">{{ t['lbl_schedule_optional'] }}</label>
+            <input x-model="form.schedule_at" type="datetime-local" class="input w-full">
+          </div>
+          <p x-show="error" x-text="error" class="text-red-400 text-xs mb-3"></p>
+          <div class="flex gap-3 justify-end">
+            <button type="button" class="btn-secondary" @click="open = false">{{ t['btn_cancel'] }}</button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              <span x-show="loading">{{ t['lbl_loading_create'] }}</span>
+              <span x-show="!loading">{{ t['btn_create'] }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function projectEditor(id, name, desc, triggerToken, loraType, baseModelFamily) {
+  return {
+    editing: false,
+    form: { name, description: desc || '', trigger_token: triggerToken || 'p3rs0n4', lora_type: loraType || 'character', base_model_family: baseModelFamily || 'flux' },
+    cancel() { this.editing = false; this.form = { name, description: desc || '', trigger_token: triggerToken || 'p3rs0n4', lora_type: loraType || 'character', base_model_family: baseModelFamily || 'flux' }; },
+    async save() {
+      const resp = await fetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.form),
+      });
+      if (resp.ok) {
+        showToast(window._t?.lbl_saved || 'Saved', 'info');
+        this.editing = false;
+        location.reload();
+      } else {
+        const d = await resp.json();
+        showToast(d.detail || (window._t?.lbl_error_generic || 'Error'), 'error');
+      }
+    }
+  }
+}
+
+function batchActions(projectId) {
+  return {
+    async batchAction(batchId, action) {
+      const resp = await fetch(`/api/batches/${batchId}/${action}`, { method: 'POST' });
+      if (resp.ok) {
+        showToast(`Batch ${action} ${window._t?.lbl_action_done || 'done'}`, 'info');
+        htmx.trigger('#batch-list', 'refreshBatchList');
+      } else {
+        const d = await resp.json().catch(() => ({}));
+        showToast(d.detail || (window._t?.lbl_error_generic || 'Error'), 'error');
+      }
+    },
+    async deleteBatch(batchId, batchName) {
+      if (!confirm(`Удалить batch "${batchName}"? Файлы изображений не будут затронуты.`)) return;
+      const resp = await fetch(`/api/batches/${batchId}`, { method: 'DELETE' });
+      if (resp.ok) {
+        showToast(window._t?.lbl_batch_deleted || 'Batch deleted', 'info');
+        htmx.trigger('#batch-list', 'refreshBatchList');
+      } else {
+        const d = await resp.json().catch(() => ({}));
+        showToast(d.detail || (window._t?.lbl_error_generic || 'Error'), 'error');
+      }
+    }
+  }
+}
+
+function createBatchModal(projectId) {
+  return {
+    open: false,
+    loading: false,
+    error: '',
+    form: {
+      name: '',
+      source_folder_path: '',
+      source_type: 'synthetic',
+      branch: 'identity',
+      schedule_at: null,
+    },
+    // Image count for the currently-entered source folder (null = not checked yet).
+    folderImageCount: null,
+    folderCheckError: '',
+    async checkFolder() {
+      const path = this.form.source_folder_path.trim();
+      if (!path) { this.folderImageCount = null; this.folderCheckError = ''; return; }
+      try {
+        const resp = await fetch(`/api/fs/list?path=${encodeURIComponent(path)}`);
+        const d = await resp.json();
+        if (d.error) { this.folderImageCount = null; this.folderCheckError = d.error; }
+        else { this.folderImageCount = d.image_count || 0; this.folderCheckError = ''; }
+      } catch {
+        this.folderImageCount = null; this.folderCheckError = 'Ошибка запроса';
+      }
+    },
+    // Folder-picker state.
+    browse: {
+      open: false,
+      loading: false,
+      error: '',
+      path: '',
+      parent: null,
+      dirs: [],
+      drives: [],
+      imageCount: 0,
+    },
+    async openBrowse() {
+      this.browse.open = true;
+      // Start from the currently-typed path if any, else the server's default starting point.
+      await this.loadDir(this.form.source_folder_path || '');
+    },
+    async loadDir(path) {
+      this.browse.loading = true;
+      this.browse.error = '';
+      try {
+        const resp = await fetch(`/api/fs/list?path=${encodeURIComponent(path || '')}`);
+        const d = await resp.json();
+        this.browse.path = d.path;
+        this.browse.parent = d.parent;
+        this.browse.dirs = d.dirs || [];
+        this.browse.drives = d.drives || [];
+        this.browse.imageCount = d.image_count || 0;
+        this.browse.error = d.error || '';
+      } catch {
+        this.browse.error = 'Ошибка запроса';
+      } finally {
+        this.browse.loading = false;
+      }
+    },
+    pickDir() {
+      if (!this.browse.path) return;
+      this.form.source_folder_path = this.browse.path;
+      // The browser already knows the count for this folder — reuse it, no extra call.
+      this.folderImageCount = this.browse.imageCount || 0;
+      this.folderCheckError = '';
+      this.browse.open = false;
+    },
+    async submit() {
+      this.error = '';
+      if (!this.form.name.trim() || !this.form.source_folder_path.trim()) {
+        this.error = window._t?.lbl_required_name_folder || 'Name and folder are required';
+        return;
+      }
+      this.loading = true;
+      const payload = { ...this.form };
+      if (!payload.schedule_at) delete payload.schedule_at;
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/batches`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const d = await resp.json();
+          this.error = d.detail || (window._t?.lbl_create_error || 'Create failed');
+          return;
+        }
+        const batch = await resp.json();
+        window.location.href = `/projects/${projectId}/batches/${batch.id}`;
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+}
+
+function deleteProject(id, name) {
+  if (!confirm(`Удалить проект "${name}"? Будут удалены все батчи и items. Файлы не будут затронуты.`)) return;
+  fetch(`/api/projects/${id}`, { method: 'DELETE' })
+    .then(r => { if (r.ok) window.location.href = '/'; else r.json().then(d => showToast(d.detail || 'Ошибка', 'error')); });
+}
+</script>
+{% endblock %}

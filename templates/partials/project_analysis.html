@@ -1,0 +1,148 @@
+{% set total = stats.total_items %}
+
+{% macro dist_table(dist_dict) %}
+{% set bucket_total = dist_dict.values() | sum %}
+<table class="w-full text-xs mb-1">
+  {% for label, count in dist_dict | dictsort(by='value', reverse=true) %}
+  <tr>
+    <td class="text-gray-400 pr-2 py-0.5 w-48 truncate">{{ label }}</td>
+    <td class="py-0.5 w-full">
+      <div class="bg-gray-800 rounded h-2.5 overflow-hidden">
+        {% if bucket_total > 0 %}
+        <div class="bg-blue-500 h-2.5 rounded"
+             style="width: {{ (count / bucket_total * 100) | round | int }}%"></div>
+        {% endif %}
+      </div>
+    </td>
+    <td class="text-gray-300 pl-2 py-0.5 text-right w-8">{{ count }}</td>
+    {% if bucket_total > 0 %}
+    <td class="text-gray-500 pl-1 py-0.5 text-right w-10">{{ (count / bucket_total * 100) | round | int }}%</td>
+    {% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="text-gray-600 italic">—</td></tr>
+  {% endfor %}
+</table>
+{% endmacro %}
+
+{% if total == 0 %}
+<div class="text-gray-500 text-sm py-3">{{ t['lbl_analysis_no_items'] }}</div>
+{% else %}
+
+<!-- Summary counts -->
+<div class="flex gap-6 text-sm mb-5 flex-wrap">
+  <div>
+    <span class="text-gray-400">{{ t['lbl_analysis_total'] }}</span>
+    <span class="text-white font-semibold ml-1">{{ total }}</span>
+  </div>
+  <div>
+    <span class="text-gray-400">{{ t['lbl_analysis_approved'] }}</span>
+    <span class="text-green-400 font-semibold ml-1">{{ stats.approved_count }}</span>
+  </div>
+  <div>
+    <span class="text-gray-400">{{ t['lbl_analysis_awaiting'] }}</span>
+    <span class="text-yellow-400 font-semibold ml-1">{{ stats.awaiting_review_count }}</span>
+  </div>
+</div>
+
+<!-- Distributions grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+
+  {% for field_name, dist in stats.distributions.items() %}
+  <div>
+    <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+      {{ field_name | replace("_", " ") }}
+    </h4>
+    {{ dist_table(dist) }}
+  </div>
+  {% endfor %}
+
+  <div>
+    <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{{ t['lbl_analysis_source_type'] }}</h4>
+    {{ dist_table(stats.source_type_split) }}
+  </div>
+
+</div>
+
+<!-- Warning codes -->
+{% if stats.warning_codes %}
+<div class="mb-5">
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{{ t['lbl_analysis_warnings'] }}</h4>
+  {{ dist_table(stats.warning_codes) }}
+</div>
+{% endif %}
+
+<!-- Per-batch breakdown -->
+{% if stats.per_batch | length > 1 %}
+<div>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">{{ t['lbl_analysis_per_batch'] }}</h4>
+  <div class="space-y-3">
+    {% for b in stats.per_batch %}
+    <div class="border border-gray-800 rounded p-3">
+      <div class="flex items-center gap-3 mb-2">
+        <a href="/projects/{{ project.id }}/batches/{{ b.batch_id }}"
+           class="text-sm text-blue-400 hover:text-blue-300 font-medium">{{ b.batch_name }}</a>
+        <span class="badge bg-gray-800 text-gray-400 border border-gray-700">{{ b.source_type }}</span>
+        <span class="text-xs text-gray-500">{{ b.total }} items</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {% for field_name, dist in b.distributions.items() %}
+        <div>
+          <p class="text-xs text-gray-500 mb-1">{{ field_name | replace("_", " ") }}</p>
+          {{ dist_table(dist) }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- LLM unavailable notice (D-108a) -->
+{% if llm_recs is none and total > 0 %}
+<div class="mt-5 border-t border-gray-800 pt-4 flex items-center gap-2 text-xs text-gray-500">
+  <span>⚠</span>
+  <span>{{ t['lbl_analysis_llm_unavailable'] }}</span>
+</div>
+{% endif %}
+
+<!-- LLM recommendations (D-108a) -->
+{% if llm_recs is not none %}
+<div class="mt-5 border-t border-gray-800 pt-5">
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+    {{ t['lbl_analysis_recommendations'] }}
+    <span class="ml-2 text-gray-600 normal-case tracking-normal font-normal">— LLM</span>
+  </h4>
+  {% if llm_recs | length == 0 %}
+  <p class="text-sm text-green-400">{{ t['lbl_analysis_recs_healthy'] }}</p>
+  {% else %}
+  <ol class="space-y-3">
+    {% for rec in llm_recs %}
+    <li class="flex gap-3">
+      <span class="flex-shrink-0 w-5 h-5 rounded-full bg-gray-800 border border-gray-700
+                   text-xs text-gray-400 flex items-center justify-center font-semibold">
+        {{ rec.get('priority', loop.index) }}
+      </span>
+      <div>
+        <p class="text-sm text-gray-200 font-medium">{{ rec.get('issue', '') }}</p>
+        <p class="text-xs text-gray-400 mt-0.5">{{ rec.get('action', '') }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endif %}
+
+<!-- Refresh button -->
+<div class="mt-4 pt-3 border-t border-gray-800">
+  <button class="btn-ghost text-xs"
+          hx-get="/partials/projects/{{ project.id }}/analysis"
+          hx-target="#analysis-content-{{ project.id }}"
+          hx-swap="innerHTML">
+    ↻ {{ t['btn_refresh'] }}
+  </button>
+</div>

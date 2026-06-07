@@ -1,0 +1,16 @@
+/* Caption Agent — minimal custom styles (supplements Tailwind Play CDN) */
+
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 #111827;
+}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: #111827; }
+*::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+
+/* Focus ring */
+:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+
+/* State badge base */
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 0.7rem; font-weight: 500; }

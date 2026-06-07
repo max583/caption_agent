@@ -1,0 +1,104 @@
+{% set dot_class = {
+  'error': 'bg-red-500',
+  'review': 'bg-yellow-400',
+  'active': 'bg-green-500',
+  'scanning': 'bg-blue-400',
+  'scheduled': 'bg-purple-500',
+  'idle': 'bg-gray-500'
+} %}
+{% for card in batch_cards %}
+<div class="card p-4 hover:border-gray-700 transition-colors group relative cursor-pointer"
+     x-data="{ menu: false }"
+     @click="window.location.href='/projects/{{ project.id }}/batches/{{ card.id }}'">
+  <div class="flex items-start gap-3">
+    <div class="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 {{ dot_class.get(card.status_category, 'bg-gray-500') }}"></div>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold text-white text-sm">{{ card.name }}</span>
+        <span class="text-gray-500 text-xs">#{{ card.id }}</span>
+        <span class="badge state-{{ card.state }}">{{ card.state }}</span>
+      </div>
+
+      {% if card.state == 'scanning' %}
+      <div class="text-xs text-blue-400 mt-1">
+        {{ t['lbl_scanning_progress'] }}… {{ card.scan_progress }}/{{ card.total_items }}
+        {% if card.total_items > 0 %}({{ (card.scan_progress / card.total_items * 100) | int }}%){% endif %}
+      </div>
+      {% elif card.state == 'scheduled' and card.schedule_at %}
+      <div class="text-xs text-gray-400 mt-1">{{ t['lbl_scheduled_at'] }} {{ card.schedule_at.strftime('%H:%M') }}</div>
+      {% elif card.state == 'processing' %}
+      <div class="text-xs text-gray-400 mt-1">{{ card.total_items }} items · {{ card.approved_items }} {{ t['lbl_approved_short'] }}</div>
+      {% elif card.state == 'awaiting_review' %}
+      <div class="text-xs text-gray-400 mt-1">{{ card.awaiting_review_items }} {{ t['lbl_awaiting_count'] }} · {{ card.approved_items }} {{ t['lbl_approved_short'] }} · {{ card.total_items }} total</div>
+      {% elif card.state == 'error' and card.last_error_reason %}
+      <div class="text-xs text-red-400 mt-1 truncate">{{ card.last_error_reason }}</div>
+      {% elif card.total_items > 0 %}
+      <div class="text-xs text-gray-400 mt-1">{{ card.total_items }} items · {{ card.approved_items }} {{ t['lbl_approved_short'] }}</div>
+      {% endif %}
+
+      {% if card.state == 'scanning' and card.total_items > 0 %}
+      <div class="mt-2">
+        <div class="bg-gray-800 rounded-full h-1.5 w-full">
+          <div class="bg-blue-400 h-1.5 rounded-full transition-all"
+               style="width: {{ (card.scan_progress / card.total_items * 100) | int }}%"></div>
+        </div>
+      </div>
+      {% elif card.total_items > 0 %}
+      <div class="mt-2">
+        <div class="bg-gray-800 rounded-full h-1.5 w-full">
+          <div class="bg-blue-500 h-1.5 rounded-full transition-all"
+               style="width: {{ card.progress_pct }}%"></div>
+        </div>
+        <div class="text-xs text-gray-500 mt-0.5">{{ card.progress_pct }}%</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Context menu -->
+  <button class="absolute top-3 right-3 text-gray-600 hover:text-gray-300 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+          @click.stop="menu = !menu">⋮</button>
+  <div x-show="menu" x-cloak
+       @click.outside="menu = false"
+       class="absolute right-3 top-10 bg-gray-800 border border-gray-700 rounded shadow-xl z-10 min-w-40">
+    {% if card.state == 'scheduled' %}
+    <button class="menu-item" @click.stop="window.location.href='/projects/{{ project.id }}/batches/{{ card.id }}'">{{ t['btn_edit_schedule'] }}</button>
+    <button class="menu-item text-red-400" @click.stop="deleteBatch({{ card.id }}, '{{ card.name | e }}')">{{ t['btn_delete'] }}</button>
+    {% elif card.state == 'queued' %}
+    <button class="menu-item text-red-400" @click.stop="deleteBatch({{ card.id }}, '{{ card.name | e }}')">{{ t['btn_delete'] }}</button>
+    {% elif card.state == 'scanning' %}
+    <button class="menu-item text-red-400" @click.stop="batchAction({{ card.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+    {% elif card.state == 'processing' %}
+    <button class="menu-item" @click.stop="batchAction({{ card.id }}, 'pause')">{{ t['btn_pause'] }}</button>
+    <button class="menu-item text-red-400" @click.stop="batchAction({{ card.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+    {% elif card.state == 'paused' %}
+    <button class="menu-item" @click.stop="batchAction({{ card.id }}, 'resume')">{{ t['btn_resume'] }}</button>
+    <button class="menu-item text-red-400" @click.stop="batchAction({{ card.id }}, 'abort')">{{ t['btn_abort'] }}</button>
+    {% elif card.state == 'error' %}
+    <button class="menu-item" @click.stop="batchAction({{ card.id }}, 'resume')">{{ t['btn_resume'] }}</button>
+    <button class="menu-item text-red-400" @click.stop="deleteBatch({{ card.id }}, '{{ card.name | e }}')">{{ t['btn_delete'] }}</button>
+    {% elif card.state == 'awaiting_review' %}
+    <button class="menu-item" @click.stop="window.location.href='/projects/{{ project.id }}/batches/{{ card.id }}'">{{ t['btn_open_review'] }}</button>
+    {% set queued_count = card.total_items - card.awaiting_review_items - card.approved_items - card.error_items %}
+    {% if queued_count > 0 %}
+    <button class="menu-item" @click.stop="batchAction({{ card.id }}, 'resume')">{{ t['btn_reprocess'] }} ({{ queued_count }})</button>
+    {% endif %}
+    <button class="menu-item" @click.stop="batchAction({{ card.id }}, 'export')">{{ t['btn_export'] }}</button>
+    <button class="menu-item text-red-400" @click.stop="deleteBatch({{ card.id }}, '{{ card.name | e }}')">{{ t['btn_delete'] }}</button>
+    {% elif card.state == 'done' %}
+    <button class="menu-item text-red-400" @click.stop="deleteBatch({{ card.id }}, '{{ card.name | e }}')">{{ t['btn_delete'] }}</button>
+    {% else %}
+    {# Fallback (e.g. exporting) so the menu is never empty. #}
+    <button class="menu-item" @click.stop="window.location.href='/projects/{{ project.id }}/batches/{{ card.id }}'">{{ t['btn_open'] }}</button>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="text-center text-gray-500 py-8">
+  <p>{{ t['lbl_no_batches'] }}</p>
+</div>
+{% endfor %}
+
+<style>
+.menu-item { @apply w-full text-left px-4 py-2 text-sm hover:bg-gray-700 block; }
+</style>
